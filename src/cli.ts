@@ -6,6 +6,7 @@ import { loadEnv } from "./config/env.js";
 import { CodeAssistClient } from "./gemini/code-assist-client.js";
 import { ModelCatalogService } from "./gemini/model-catalog-service.js";
 import { createApp } from "./server/app.js";
+import { performSelfUpdate } from "./update/self-update.js";
 
 function usage() {
   process.stdout.write(
@@ -14,7 +15,8 @@ function usage() {
       "  geminimock serve",
       "  geminimock auth login",
       "  geminimock auth logout",
-      "  geminimock models list"
+      "  geminimock models list",
+      "  geminimock update"
     ].join("\n") + "\n"
   );
 }
@@ -56,6 +58,10 @@ async function runModelsList() {
   process.stdout.write(`${models.join("\n")}\n`);
 }
 
+async function runUpdate() {
+  await performSelfUpdate("geminimock");
+}
+
 async function main() {
   const args = process.argv.slice(2);
 
@@ -76,6 +82,11 @@ async function main() {
 
   if (args[0] === "models" && args[1] === "list") {
     await runModelsList();
+    return;
+  }
+
+  if (args[0] === "update") {
+    await runUpdate();
     return;
   }
 

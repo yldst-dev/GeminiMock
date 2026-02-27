@@ -12,6 +12,7 @@ Installed CLI command:
 - `geminimock auth login`
 - `geminimock auth logout`
 - `geminimock models list`
+- `geminimock update`
 - `geminimock serve`
 
 ## Commands
@@ -19,6 +20,7 @@ Installed CLI command:
 - `bun run auth:login`
 - `bun run auth:logout`
 - `bun run models:list`
+- `bun run self:update`
 - `bun run dev`
 - `bun run start`
 - `bun run test`

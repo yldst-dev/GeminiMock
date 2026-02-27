@@ -1,6 +1,6 @@
 {
   "name": "geminimock",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "bin": {
     "geminimock": "dist/cli.js"
@@ -19,6 +19,7 @@
     "auth:login": "bun src/cli.ts auth login",
     "auth:logout": "bun src/cli.ts auth logout",
     "models:list": "bun src/cli.ts models list",
+    "self:update": "bun src/cli.ts update",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
