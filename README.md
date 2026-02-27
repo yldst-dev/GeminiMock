@@ -25,6 +25,8 @@ Installed CLI command:
 - `bun run lint`
 - `bun run typecheck`
 - `bun run build`
+- `bun run verify:release`
+- `bun run check:deps`
 
 ## Environment
 
@@ -45,6 +47,7 @@ Installed CLI command:
 1. Run `bun run auth:login`
 2. Browser opens automatically and listens on a local callback URL
 3. If browser callback is not available, paste either authorization code or full callback URL
+4. If OAuth client env values are not set but `~/.gemini/oauth_creds.json` exists, stored credentials are reused
 
 ## API
 

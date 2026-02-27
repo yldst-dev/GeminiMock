@@ -12,6 +12,7 @@ import {
   exchangeManualCode,
   exchangeWebCode,
   GEMINI_CLI_OAUTH_SCOPE,
+  hasConfiguredOAuthClient,
   parseOAuthInput,
   type ParsedOAuthInput
 } from "./oauth-flow.js";
@@ -52,9 +53,13 @@ async function fetchUserEmail(client: OAuth2Client): Promise<string | undefined>
   if (!token.token) {
     return undefined;
   }
+  return fetchUserEmailFromAccessToken(token.token);
+}
+
+async function fetchUserEmailFromAccessToken(accessToken: string): Promise<string | undefined> {
   const response = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
     headers: {
-      Authorization: `Bearer ${token.token}`
+      Authorization: `Bearer ${accessToken}`
     }
   });
   if (!response.ok) {
@@ -223,6 +228,21 @@ export class OAuthService {
   constructor(private readonly store: CredentialStore) {}
 
   async login(io: OAuthServiceIO = defaultIO()): Promise<{ email?: string }> {
+    if (!hasConfiguredOAuthClient()) {
+      const existing = await this.store.load();
+      if (existing?.access_token) {
+        const normalized = normalizeCredentials(existing);
+        await this.store.save(normalized);
+        const email = await fetchUserEmailFromAccessToken(existing.access_token);
+        io.write("OAuth client env is not configured. Reusing existing stored credentials.\n");
+        io.write("Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET for fresh OAuth login.\n");
+        return { email };
+      }
+      throw new Error(
+        "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET."
+      );
+    }
+
     try {
       const result = await this.loginWithWebCallback(io);
       return result;
@@ -333,6 +353,13 @@ export class OAuthService {
   }
 
   async getAccessToken(): Promise<string> {
+    const credentials = await this.store.load();
+    if (credentials?.access_token) {
+      const expiresAt = credentials.expiry_date ?? Number.MAX_SAFE_INTEGER;
+      if (expiresAt > Date.now() + 60_000) {
+        return credentials.access_token;
+      }
+    }
     const client = await this.getClient();
     const token = await client.getAccessToken();
     if (!token.token) {

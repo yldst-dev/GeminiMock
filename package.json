@@ -1,6 +1,6 @@
 {
   "name": "geminimock",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "bin": {
     "geminimock": "dist/cli.js"
@@ -24,6 +24,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json && node scripts/prepare-cli-bin.mjs",
+    "verify:release": "npm run test && npm run lint && npm run typecheck && npm run build && bun audit && npm audit --omit=dev",
+    "check:deps": "npm outdated || true",
     "prepack": "npm run build"
   },
   "dependencies": {

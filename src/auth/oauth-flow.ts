@@ -28,7 +28,23 @@ export type ParsedOAuthInput = {
   state?: string;
 };
 
+function isPlaceholder(value: string): boolean {
+  return value.startsWith("replace-with-");
+}
+
+export function hasConfiguredOAuthClient(): boolean {
+  return GEMINI_CLI_OAUTH_CLIENT_ID.length > 0
+    && GEMINI_CLI_OAUTH_CLIENT_SECRET.length > 0
+    && !isPlaceholder(GEMINI_CLI_OAUTH_CLIENT_ID)
+    && !isPlaceholder(GEMINI_CLI_OAUTH_CLIENT_SECRET);
+}
+
 export function createOAuthClient(): OAuth2Client {
+  if (!hasConfiguredOAuthClient()) {
+    throw new Error(
+      "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET."
+    );
+  }
   return new OAuth2Client({
     clientId: GEMINI_CLI_OAUTH_CLIENT_ID,
     clientSecret: GEMINI_CLI_OAUTH_CLIENT_SECRET
