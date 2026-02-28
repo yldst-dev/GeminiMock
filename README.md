@@ -85,14 +85,84 @@ Installed CLI command:
 - use `geminimock auth accounts list` to inspect active account and IDs
 - use `geminimock auth accounts use <id|email>` to pin a specific account manually
 
-## API
+## Service Usage Guide
+
+### 1) Start service
+
+Run OAuth login first:
+
+```bash
+geminimock auth login
+```
+
+Start in background:
+
+```bash
+geminimock server start
+geminimock server status
+```
+
+- default URL is `http://127.0.0.1:43173`
+- if `43173` is in use, an available port is selected automatically
+- always check actual URL with `geminimock server status`
+- log file: `~/.geminimock/server.log`
+
+Run in foreground:
+
+```bash
+geminimock serve
+```
+
+Quick health check:
+
+```bash
+curl -sS http://127.0.0.1:43173/health
+```
+
+### 2) API endpoints
 
 - `GET /health`
 - `GET /v1/auth/status`
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 
-Example:
+Check auth status:
+
+```bash
+curl -sS http://127.0.0.1:43173/v1/auth/status
+```
+
+Response:
+
+```json
+{"authenticated":true}
+```
+
+List available models from current account/project:
+
+```bash
+curl -sS http://127.0.0.1:43173/v1/models
+```
+
+Response format (OpenAI-style model list):
+
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "gemini-2.5-flash",
+      "object": "model",
+      "created": 0,
+      "owned_by": "google-code-assist"
+    }
+  ]
+}
+```
+
+### 3) Chat completion call pattern
+
+Basic request:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
@@ -100,38 +170,106 @@ curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
   -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-```bash
-curl -sS http://127.0.0.1:43173/v1/models
+Basic response format (OpenAI-style):
+
+```json
+{
+  "id": "chatcmpl-...",
+  "object": "chat.completion",
+  "created": 1772175296,
+  "model": "gemini-2.5-flash",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "STOP",
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 1,
+    "completion_tokens": 9,
+    "total_tokens": 31
+  }
+}
 ```
 
-Notes:
+Streaming request (`stream: true`, SSE):
 
-- `messages` must include at least one non-`system` message (`user` or `assistant`). Sending only `system` can fail with:
-  - `400 INVALID_ARGUMENT: at least one contents field is required`
-- To use system prompt, include both `system` and `user`:
+```bash
+curl -N -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+```
+
+Streaming response format:
+
+```text
+data: {"id":"...","object":"chat.completion.chunk","choices":[{"delta":{"role":"assistant","content":"Hel"}}]}
+data: {"id":"...","object":"chat.completion.chunk","choices":[{"delta":{"content":"lo"}}]}
+data: {"id":"...","object":"chat.completion.chunk","choices":[{"finish_reason":"stop","delta":{}}]}
+data: [DONE]
+```
+
+### 4) How answers are generated
+
+- API is stateless per request
+- server does not keep conversation memory between calls
+- to continue a conversation, send full history in `messages` each call
+- response text is mapped to `choices[0].message.content`
+- token usage is mapped to `usage.prompt_tokens`, `usage.completion_tokens`, `usage.total_tokens`
+
+Model resolution behavior:
+
+- if requested model is unavailable, alias mapping may be applied
+- example: `gemini-3-flash` -> `gemini-3-flash-preview` (when available)
+- model list normalizes `_vertex` suffix
+
+### 5) System prompt and role mapping
+
+System prompt usage example:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
   -H 'content-type: application/json' \
-  -d '{"model":"gemini-2.5-flash","messages":[{"role":"system","content":"You are concise."},{"role":"user","content":"Hello"}]}'
+  -d '{"model":"gemini-2.5-flash","messages":[{"role":"system","content":"You are concise."},{"role":"user","content":"Summarize OAuth in one sentence."}]}'
 ```
 
-Troubleshooting:
+Role mapping rules:
 
-- `403 PERMISSION_DENIED` (for example `IAM_PERMISSION_DENIED`) usually means the active account does not have permission on the resolved Google project/model.
-- Check active account and switch if needed:
-  - `geminimock auth accounts list`
-  - `geminimock auth accounts use <id|email>`
-- Check currently available models for that account/project:
-  - `geminimock models list`
+- `system` messages are merged and sent as Gemini `systemInstruction`
+- `assistant` maps to Gemini `model`
+- `user` maps to Gemini `user`
+- `developer` and `tool` are accepted but mapped as `user`
 
-## Background Server
+Important:
 
-- start: `geminimock server start`
-- status: `geminimock server status`
-- stop: `geminimock server stop`
-- log file: `~/.geminimock/server.log`
-- if `43173` is already in use, `server start` automatically picks an available port; check the actual URL with `server status`
+- include at least one non-`system` message (`user` or `assistant`)
+- sending only `system` may fail with `400 INVALID_ARGUMENT` from upstream
+
+### 6) Error response style
+
+Validation/route errors:
+
+```json
+{"error":{"message":"..."}}
+```
+
+Common upstream errors:
+
+- `403 PERMISSION_DENIED`: active account lacks permission for resolved project/model
+- `404 NOT_FOUND`: requested model or entity does not exist in current project/account
+- `429 RESOURCE_EXHAUSTED`: quota/capacity/rate limit
+
+Troubleshooting steps:
+
+1. Check current auth: `curl -sS http://127.0.0.1:43173/v1/auth/status`
+2. Check available models: `geminimock models list`
+3. Check active account and switch if needed:
+   - `geminimock auth accounts list`
+   - `geminimock auth accounts use <id|email>`
 
 ## GitHub Release Automation
 
