@@ -5,7 +5,8 @@ describe("loadEnv", () => {
   it("loads defaults", () => {
     const env = loadEnv({});
     expect(env.host).toBe("127.0.0.1");
-    expect(env.port).toBe(8080);
+    expect(env.port).toBe(43173);
+    expect(env.accountsPath).toContain(".geminimock");
     expect(env.codeAssistEndpoint).toBe("https://cloudcode-pa.googleapis.com");
     expect(env.codeAssistApiVersion).toBe("v1internal");
   });

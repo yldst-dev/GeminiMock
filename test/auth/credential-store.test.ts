@@ -44,4 +44,24 @@ describe("credential store", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("does not load fallback after clear", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "gca-store-"));
+    try {
+      const primary = join(dir, "primary.json");
+      const fallback = join(dir, "fallback.json");
+      const fallbackStore = createCredentialStore(fallback);
+      await fallbackStore.save({
+        access_token: "a",
+        refresh_token: "r"
+      });
+      const store = createCredentialStore(primary, fallback);
+      await store.clear();
+      const loaded = await store.load();
+      expect(loaded).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
 });

@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { ZodError } from "zod";
-import { createCredentialStore } from "../auth/credential-store.js";
+import { createAccountStore } from "../auth/account-store.js";
 import { OAuthService } from "../auth/oauth-service.js";
 import { loadEnv, type AppEnv } from "../config/env.js";
 import { CodeAssistClient } from "../gemini/code-assist-client.js";
@@ -23,9 +23,18 @@ export type AppDependencies = {
 };
 
 export async function createDefaultDependencies(env = loadEnv()): Promise<AppDependencies> {
-  const store = createCredentialStore(env.oauthPath, env.oauthFallbackPath);
+  const store = createAccountStore(env.accountsPath, env.oauthPath, env.oauthFallbackPath);
   const oauthService = new OAuthService(store);
-  const codeAssistClient = new CodeAssistClient(env, () => oauthService.getAccessToken());
+  const codeAssistClient = new CodeAssistClient(
+    env,
+    () => oauthService.getAccessToken(),
+    {
+      onApiError: (error) => oauthService.handleCodeAssistError(error),
+      onApiSuccess: () => oauthService.handleCodeAssistSuccess(),
+      maxAttempts: () => oauthService.getApiAttemptLimit(),
+      getAccountCacheKey: () => oauthService.getActiveAccountId()
+    }
+  );
   const modelCatalogService = new ModelCatalogService(codeAssistClient);
   const chatService = new OpenAIChatService(env.defaultModel, codeAssistClient, modelCatalogService);
   return { env, oauthService, chatService, modelCatalogService };

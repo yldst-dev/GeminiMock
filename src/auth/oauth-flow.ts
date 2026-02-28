@@ -1,14 +1,30 @@
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { CodeChallengeMethod, OAuth2Client, type Credentials } from "google-auth-library";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
+import { OAuth2Client, CodeChallengeMethod, type Credentials } from "google-auth-library";
 
-export const GEMINI_CLI_OAUTH_CLIENT_ID = process.env.GEMINI_CLI_OAUTH_CLIENT_ID ?? "replace-with-google-oauth-client-id";
-export const GEMINI_CLI_OAUTH_CLIENT_SECRET = process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET ?? "replace-with-google-oauth-client-secret";
+const GEMINI_OAUTH_SOURCE_RELATIVE_PATHS = [
+  "node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+  "lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+  "@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+  "@google/gemini-cli-core/dist/src/code_assist/oauth2.js"
+] as const;
+
 export const GEMINI_CLI_OAUTH_REDIRECT_URI = "https://codeassist.google.com/authcode";
 export const GEMINI_CLI_OAUTH_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/userinfo.profile"
 ] as const;
+const GEMINI_CLI_OAUTH_PROMPT = "consent select_account";
+
+type OAuthClientConfig = {
+  clientId: string;
+  clientSecret?: string;
+};
+
+let discoveredClientConfig: OAuthClientConfig | null | undefined;
 
 export type ManualOAuthRequest = {
   authUrl: string;
@@ -28,26 +44,132 @@ export type ParsedOAuthInput = {
   state?: string;
 };
 
-function isPlaceholder(value: string): boolean {
-  return value.startsWith("replace-with-");
+function readConfigFromSourceFile(filePath: string): OAuthClientConfig | null {
+  if (!existsSync(filePath)) {
+    return null;
+  }
+
+  let source = "";
+  try {
+    source = readFileSync(filePath, "utf8");
+  } catch {
+    return null;
+  }
+
+  const idMatch = source.match(/const OAUTH_CLIENT_ID = ['"]([^'"]+)['"]/);
+  if (!idMatch?.[1]) {
+    return null;
+  }
+  const secretMatch = source.match(/const OAUTH_CLIENT_SECRET = ['"]([^'"]+)['"]/);
+  return {
+    clientId: idMatch[1],
+    clientSecret: secretMatch?.[1]
+  };
+}
+
+function findConfigInDirectory(baseDir: string): OAuthClientConfig | null {
+  for (const relativePath of GEMINI_OAUTH_SOURCE_RELATIVE_PATHS) {
+    const config = readConfigFromSourceFile(path.join(baseDir, relativePath));
+    if (config) {
+      return config;
+    }
+  }
+  return null;
+}
+
+function discoverFromGeminiBinary(): OAuthClientConfig | null {
+  let binaryPath = process.env.GEMINI_CLI_BIN_PATH?.trim();
+  if (!binaryPath) {
+    try {
+      binaryPath = execFileSync("which", ["gemini"], { encoding: "utf8" }).trim();
+    } catch {
+      return null;
+    }
+  }
+  if (!binaryPath) {
+    return null;
+  }
+
+  let resolved = binaryPath;
+  try {
+    resolved = realpathSync(binaryPath);
+  } catch {}
+
+  let current = path.dirname(resolved);
+  for (let i = 0; i < 10; i += 1) {
+    const config = findConfigInDirectory(current);
+    if (config) {
+      return config;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return null;
+}
+
+function discoverFromGlobalNpmRoot(): OAuthClientConfig | null {
+  try {
+    const root = execFileSync("npm", ["root", "-g"], { encoding: "utf8" }).trim();
+    if (!root) {
+      return null;
+    }
+    return findConfigInDirectory(root);
+  } catch {
+    return null;
+  }
+}
+
+function discoverDefaultClientConfig(): OAuthClientConfig | null {
+  if (process.env.GEMINI_CLI_OAUTH_AUTO_DISCOVERY === "0") {
+    return null;
+  }
+  if (discoveredClientConfig !== undefined) {
+    return discoveredClientConfig;
+  }
+
+  const sourcePath = process.env.GEMINI_CLI_OAUTH_SOURCE_PATH?.trim();
+  if (sourcePath) {
+    discoveredClientConfig = readConfigFromSourceFile(sourcePath);
+    return discoveredClientConfig;
+  }
+
+  discoveredClientConfig = discoverFromGeminiBinary() ?? discoverFromGlobalNpmRoot() ?? null;
+  return discoveredClientConfig;
+}
+
+function resolveClientId(): string | undefined {
+  const envClientId = process.env.GEMINI_CLI_OAUTH_CLIENT_ID?.trim();
+  if (envClientId) {
+    return envClientId;
+  }
+  return discoverDefaultClientConfig()?.clientId;
+}
+
+function resolveClientSecret(): string | undefined {
+  const envClientSecret = process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET?.trim();
+  if (envClientSecret) {
+    return envClientSecret;
+  }
+  return discoverDefaultClientConfig()?.clientSecret;
 }
 
 export function hasConfiguredOAuthClient(): boolean {
-  return GEMINI_CLI_OAUTH_CLIENT_ID.length > 0
-    && GEMINI_CLI_OAUTH_CLIENT_SECRET.length > 0
-    && !isPlaceholder(GEMINI_CLI_OAUTH_CLIENT_ID)
-    && !isPlaceholder(GEMINI_CLI_OAUTH_CLIENT_SECRET);
+  return Boolean(resolveClientId());
 }
 
 export function createOAuthClient(): OAuth2Client {
-  if (!hasConfiguredOAuthClient()) {
+  const clientId = resolveClientId();
+  if (!clientId) {
     throw new Error(
-      "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET."
+      "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID or install Gemini CLI."
     );
   }
   return new OAuth2Client({
-    clientId: GEMINI_CLI_OAUTH_CLIENT_ID,
-    clientSecret: GEMINI_CLI_OAUTH_CLIENT_SECRET
+    clientId,
+    clientSecret: resolveClientSecret()
   });
 }
 
@@ -58,7 +180,7 @@ export async function buildManualOAuthRequest(): Promise<ManualOAuthRequest> {
   const authUrl = client.generateAuthUrl({
     redirect_uri: GEMINI_CLI_OAUTH_REDIRECT_URI,
     access_type: "offline",
-    prompt: "consent",
+    prompt: GEMINI_CLI_OAUTH_PROMPT,
     scope: [...GEMINI_CLI_OAUTH_SCOPE],
     code_challenge_method: CodeChallengeMethod.S256,
     code_challenge: verifier.codeChallenge,
@@ -79,7 +201,7 @@ export function buildWebOAuthRequest(port: number): WebOAuthRequest {
   const authUrl = client.generateAuthUrl({
     redirect_uri: redirectUri,
     access_type: "offline",
-    prompt: "consent",
+    prompt: GEMINI_CLI_OAUTH_PROMPT,
     scope: [...GEMINI_CLI_OAUTH_SCOPE],
     state
   });

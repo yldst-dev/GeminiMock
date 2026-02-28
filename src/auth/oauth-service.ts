@@ -4,7 +4,8 @@ import net from "node:net";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import type { OAuth2Client } from "google-auth-library";
-import type { CredentialStore, StoredCredentials } from "./credential-store.js";
+import type { AccountStore, StoredAccount } from "./account-store.js";
+import type { StoredCredentials } from "./credential-store.js";
 import {
   buildManualOAuthRequest,
   buildWebOAuthRequest,
@@ -16,6 +17,7 @@ import {
   parseOAuthInput,
   type ParsedOAuthInput
 } from "./oauth-flow.js";
+import type { CodeAssistApiError } from "../gemini/errors.js";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -67,6 +69,52 @@ async function fetchUserEmailFromAccessToken(accessToken: string): Promise<strin
   }
   const data = (await response.json()) as { email?: string };
   return data.email;
+}
+
+function shouldRotateForError(error: CodeAssistApiError): boolean {
+  const body = error.body.toLowerCase();
+  if (error.status === 429 || error.status === 503 || error.status === 401 || error.status === 403) {
+    return true;
+  }
+  if (error.status === 500 && body.includes("resource_exhausted")) {
+    return true;
+  }
+  if (body.includes("model_capacity_exhausted")
+    || body.includes("no capacity available")
+    || body.includes("ratelimitexceeded")
+    || body.includes("rate limit")
+    || body.includes("quota")
+    || body.includes("resource_exhausted")) {
+    return true;
+  }
+  return false;
+}
+
+function cooldownForError(error: CodeAssistApiError): number {
+  if (typeof error.retryAfterMs === "number" && error.retryAfterMs > 0) {
+    return error.retryAfterMs;
+  }
+
+  const body = error.body.toLowerCase();
+  if (error.status === 401 || error.status === 403) {
+    return 15 * 60 * 1000;
+  }
+  if (body.includes("model_capacity_exhausted") || body.includes("no capacity available")) {
+    return 45_000;
+  }
+  if (body.includes("quota")) {
+    return 30 * 60 * 1000;
+  }
+  if (error.status === 429) {
+    return 60_000;
+  }
+  if (error.status === 503) {
+    return 60_000;
+  }
+  if (error.status === 500 && body.includes("resource_exhausted")) {
+    return 60_000;
+  }
+  return 30_000;
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -211,36 +259,24 @@ async function startCallbackListener(port: number, timeoutMs: number): Promise<{
   };
 }
 
-async function persistCredentials(store: CredentialStore, tokens: StoredCredentials): Promise<StoredCredentials> {
-  const existing = await store.load();
-  const normalized = normalizeCredentials({
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token ?? existing?.refresh_token,
-    expiry_date: tokens.expiry_date ?? existing?.expiry_date,
-    token_type: tokens.token_type,
-    scope: tokens.scope
-  });
-  await store.save(normalized);
-  return normalized;
-}
-
 export class OAuthService {
-  constructor(private readonly store: CredentialStore) {}
+  constructor(private readonly store: AccountStore) {}
+
+  async listAccounts(): Promise<StoredAccount[]> {
+    return this.store.listAccounts();
+  }
+
+  async useAccount(idOrEmail: string): Promise<StoredAccount> {
+    return this.store.setActiveAccount(idOrEmail);
+  }
+
+  async removeAccount(idOrEmail: string): Promise<boolean> {
+    return this.store.removeAccount(idOrEmail);
+  }
 
   async login(io: OAuthServiceIO = defaultIO()): Promise<{ email?: string }> {
     if (!hasConfiguredOAuthClient()) {
-      const existing = await this.store.load();
-      if (existing?.access_token) {
-        const normalized = normalizeCredentials(existing);
-        await this.store.save(normalized);
-        const email = await fetchUserEmailFromAccessToken(existing.access_token);
-        io.write("OAuth client env is not configured. Reusing existing stored credentials.\n");
-        io.write("Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET for fresh OAuth login.\n");
-        return { email };
-      }
-      throw new Error(
-        "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID and GEMINI_CLI_OAUTH_CLIENT_SECRET."
-      );
+      throw new Error("OAuth client is not configured.");
     }
 
     try {
@@ -277,7 +313,7 @@ export class OAuthService {
         throw new Error("OAuth login did not return access_token");
       }
 
-      const stored = await persistCredentials(this.store, {
+      const stored = normalizeCredentials({
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token ?? undefined,
         expiry_date: tokens.expiry_date ?? undefined,
@@ -285,9 +321,11 @@ export class OAuthService {
         scope: tokens.scope ?? undefined
       });
 
+      await this.store.addOrUpdateAccount(stored);
       const client = createOAuthClient();
       client.setCredentials(stored);
       const email = await fetchUserEmail(client);
+      await this.store.updateActiveCredentials(stored, email);
       return { email };
     } finally {
       await listener.close();
@@ -308,7 +346,7 @@ export class OAuthService {
       throw new Error("OAuth login did not return access_token");
     }
 
-    const stored = await persistCredentials(this.store, {
+    const stored = normalizeCredentials({
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token ?? undefined,
       expiry_date: tokens.expiry_date ?? undefined,
@@ -316,22 +354,29 @@ export class OAuthService {
       scope: tokens.scope ?? undefined
     });
 
+    await this.store.addOrUpdateAccount(stored);
     const client = createOAuthClient();
     client.setCredentials(stored);
     const email = await fetchUserEmail(client);
+    await this.store.updateActiveCredentials(stored, email);
     return { email };
   }
 
-  async logout(): Promise<void> {
-    await this.store.clear();
+  async logout(): Promise<StoredAccount | null> {
+    return this.store.logoutActive();
+  }
+
+  async logoutAll(): Promise<void> {
+    await this.store.clearAll();
   }
 
   async getClient(): Promise<OAuth2Client> {
-    const credentials = await this.store.load();
-    if (!credentials) {
+    const active = await this.store.getActiveAccount();
+    if (!active) {
       throw new Error("OAuth credentials not found. Run auth login first.");
     }
 
+    const credentials = active.credentials;
     const client = createOAuthClient();
     client.setCredentials(normalizeCredentials(credentials));
 
@@ -347,13 +392,14 @@ export class OAuthService {
       token_type: client.credentials.token_type ?? undefined,
       scope: client.credentials.scope ?? undefined
     });
-    await this.store.save(merged);
+    await this.store.updateActiveCredentials(merged, active.email);
     client.setCredentials(merged);
     return client;
   }
 
   async getAccessToken(): Promise<string> {
-    const credentials = await this.store.load();
+    const active = await this.store.getActiveAccount();
+    const credentials = active?.credentials;
     if (credentials?.access_token) {
       const expiresAt = credentials.expiry_date ?? Number.MAX_SAFE_INTEGER;
       if (expiresAt > Date.now() + 60_000) {
@@ -366,5 +412,30 @@ export class OAuthService {
       throw new Error("Access token is empty");
     }
     return token.token;
+  }
+
+  async getApiAttemptLimit(): Promise<number> {
+    const count = await this.store.getAccountCount();
+    const attempts = Math.max(1, count);
+    return attempts > 6 ? 6 : attempts;
+  }
+
+  async getActiveAccountId(): Promise<string | undefined> {
+    const active = await this.store.getActiveAccount();
+    return active?.id;
+  }
+
+  async handleCodeAssistSuccess(): Promise<void> {
+    await this.store.markActiveUsed();
+  }
+
+  async handleCodeAssistError(error: CodeAssistApiError): Promise<boolean> {
+    if (!shouldRotateForError(error)) {
+      return false;
+    }
+    const cooldownMs = cooldownForError(error);
+    const reason = `${error.status}:${error.method}`;
+    const rotated = await this.store.rotateActiveAccount(reason, cooldownMs);
+    return Boolean(rotated);
   }
 }

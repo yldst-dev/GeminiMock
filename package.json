@@ -1,6 +1,6 @@
 {
   "name": "geminimock",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "bin": {
     "geminimock": "dist/cli.js"
@@ -16,8 +16,13 @@
   "scripts": {
     "dev": "bun --watch src/cli.ts serve",
     "start": "bun src/cli.ts serve",
+    "server:start": "bun src/cli.ts server start",
+    "server:stop": "bun src/cli.ts server stop",
+    "server:status": "bun src/cli.ts server status",
     "auth:login": "bun src/cli.ts auth login",
     "auth:logout": "bun src/cli.ts auth logout",
+    "auth:logout:all": "bun src/cli.ts auth logout --all",
+    "auth:accounts:list": "bun src/cli.ts auth accounts list",
     "models:list": "bun src/cli.ts models list",
     "self:update": "bun src/cli.ts update",
     "test": "vitest run",

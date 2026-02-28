@@ -8,6 +8,7 @@ import type {
   OnboardUserRequest,
   RetrieveUserQuotaResponse
 } from "./types.js";
+import { CodeAssistApiError, parseRetryAfterMs } from "./errors.js";
 
 function platformToCode(): string {
   const p = process.platform;
@@ -62,11 +63,107 @@ async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerat
 
 export class CodeAssistClient {
   private projectCache?: string;
+  private projectCacheAccountKey?: string;
 
   constructor(
     private readonly env: AppEnv,
-    private readonly getAccessToken: () => Promise<string>
+    private readonly getAccessToken: () => Promise<string>,
+    private readonly hooks: {
+      onApiError?: (error: CodeAssistApiError) => Promise<boolean>;
+      onApiSuccess?: () => Promise<void>;
+      maxAttempts?: () => number | Promise<number>;
+      getAccountCacheKey?: () => string | undefined | Promise<string | undefined>;
+    } = {}
   ) {}
+
+  private async resolveAccountCacheKey(): Promise<string | undefined> {
+    const key = this.hooks.getAccountCacheKey ? await this.hooks.getAccountCacheKey() : undefined;
+    return key ?? undefined;
+  }
+
+  private async refreshCacheContext(): Promise<void> {
+    const accountKey = await this.resolveAccountCacheKey();
+    if (accountKey !== this.projectCacheAccountKey) {
+      this.projectCache = undefined;
+      this.projectCacheAccountKey = accountKey;
+    }
+  }
+
+  private async invalidateProjectCache(): Promise<void> {
+    this.projectCache = undefined;
+    this.projectCacheAccountKey = await this.resolveAccountCacheKey();
+  }
+
+  private async resolveAttempts(): Promise<number> {
+    const candidate = this.hooks.maxAttempts ? await this.hooks.maxAttempts() : 1;
+    if (!Number.isFinite(candidate) || candidate < 1) {
+      return 1;
+    }
+    return Math.floor(candidate);
+  }
+
+  private async withJsonRetry<T>(
+    method: string,
+    execute: (token: string) => Promise<Response>,
+    onRetry?: () => Promise<void>
+  ): Promise<T> {
+    const attempts = await this.resolveAttempts();
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const token = await this.getAccessToken();
+      const response = await execute(token);
+      if (response.ok) {
+        const payload = (await response.json()) as T;
+        await this.hooks.onApiSuccess?.();
+        return payload;
+      }
+
+      const body = await response.text();
+      const error = new CodeAssistApiError(
+        method,
+        response.status,
+        body,
+        parseRetryAfterMs(response.headers.get("retry-after"))
+      );
+      const canRetry = attempt < attempts && await this.hooks.onApiError?.(error);
+      if (!canRetry) {
+        throw error;
+      }
+      await this.invalidateProjectCache();
+      await onRetry?.();
+    }
+    throw new Error(`Code Assist ${method} failed`);
+  }
+
+  private async withStreamRetry(
+    method: string,
+    execute: (token: string) => Promise<Response>,
+    onRetry?: () => Promise<void>
+  ): Promise<Response> {
+    const attempts = await this.resolveAttempts();
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const token = await this.getAccessToken();
+      const response = await execute(token);
+      if (response.ok) {
+        await this.hooks.onApiSuccess?.();
+        return response;
+      }
+
+      const body = await response.text();
+      const error = new CodeAssistApiError(
+        method,
+        response.status,
+        body,
+        parseRetryAfterMs(response.headers.get("retry-after"))
+      );
+      const canRetry = attempt < attempts && await this.hooks.onApiError?.(error);
+      if (!canRetry) {
+        throw error;
+      }
+      await this.invalidateProjectCache();
+      await onRetry?.();
+    }
+    throw new Error(`Code Assist ${method} failed`);
+  }
 
   private buildUrl(method: string, query?: URLSearchParams): string {
     const base = `${this.env.codeAssistEndpoint}/${this.env.codeAssistApiVersion}:${method}`;
@@ -77,22 +174,21 @@ export class CodeAssistClient {
   }
 
   private async postJson<T>(method: string, body: unknown, query?: URLSearchParams): Promise<T> {
-    const token = await this.getAccessToken();
-    const response = await fetch(this.buildUrl(method, query), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(body)
+    return this.withJsonRetry<T>(method, async (token) => {
+      return fetch(this.buildUrl(method, query), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+    }, async () => {
+      if (method === "generateContent") {
+        const payload = body as { project?: string };
+        payload.project = await this.resolveProjectId();
+      }
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Code Assist ${method} failed (${response.status}): ${text}`);
-    }
-
-    return (await response.json()) as T;
   }
 
   async loadCodeAssist(projectId?: string): Promise<LoadCodeAssistResponse> {
@@ -112,21 +208,18 @@ export class CodeAssistClient {
   }
 
   async getOperation(name: string): Promise<LongRunningOperationResponse> {
-    const token = await this.getAccessToken();
-    const response = await fetch(`${this.env.codeAssistEndpoint}/${this.env.codeAssistApiVersion}/${name}`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+    return this.withJsonRetry<LongRunningOperationResponse>("operation", async (token) => {
+      return fetch(`${this.env.codeAssistEndpoint}/${this.env.codeAssistApiVersion}/${name}`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
     });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Code Assist operation failed (${response.status}): ${text}`);
-    }
-    return (await response.json()) as LongRunningOperationResponse;
   }
 
   async resolveProjectId(): Promise<string | undefined> {
+    await this.refreshCacheContext();
     if (this.projectCache) {
       return this.projectCache;
     }
@@ -184,21 +277,19 @@ export class CodeAssistClient {
   }
 
   async *streamGenerateContent(request: CAGenerateContentRequest): AsyncGenerator<CaGenerateContentResponse> {
-    const token = await this.getAccessToken();
     const query = new URLSearchParams({ alt: "sse" });
-    const response = await fetch(this.buildUrl("streamGenerateContent", query), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(request)
+    const response = await this.withStreamRetry("streamGenerateContent", async (token) => {
+      return fetch(this.buildUrl("streamGenerateContent", query), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(request)
+      });
+    }, async () => {
+      request.project = await this.resolveProjectId();
     });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Code Assist streamGenerateContent failed (${response.status}): ${text}`);
-    }
 
     if (!response.body) {
       throw new Error("Empty stream body");
