@@ -1,27 +1,31 @@
 name: npm-publish
 
 on:
-  release:
+  workflow_run:
+    workflows:
+      - release
     types:
-      - published
+      - completed
+  workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: npm-publish-${{ github.event.release.tag_name }}
+  group: npm-publish-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout source
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,17 +42,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Verify package version matches release tag
+      - name: Read package version
+        id: version
         run: |
-          TAG="${{ github.event.release.tag_name }}"
           VERSION=$(node -e "console.log(require('./package.json').version)")
-          if [ "v$VERSION" != "$TAG" ]; then
-            echo "Tag/version mismatch: tag=$TAG package=v$VERSION"
-            exit 1
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure release tag exists
+        run: |
+          gh release view "${{ steps.version.outputs.tag }}" --repo "${{ github.repository }}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Check if version is already published
+        id: published
+        run: |
+          if npm view "geminimock@${{ steps.version.outputs.version }}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Verify release build
+        if: steps.published.outputs.exists == 'false'
         run: npm run verify:release
 
       - name: Publish to npm
+        if: steps.published.outputs.exists == 'false'
         run: npm publish --access public --provenance
