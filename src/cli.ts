@@ -133,6 +133,7 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
       emitKeypressEvents(stdin);
       stdin.on("keypress", onKeypress);
       stdin.setRawMode(true);
+      stdin.resume();
       process.stdout.write("\u001b[?25l");
       keyQueue.length = 0;
       ignoreLoginKeysUntil = Date.now() + 1000;
