@@ -295,7 +295,12 @@ Troubleshooting steps:
 
 ## GitHub Release Automation
 
-- On push to `main`, `auto-version-bump.yml` automatically increments the patch version in `package.json` and `package-lock.json`.
+- On push to `main`, `auto-version-bump.yml` automatically bumps version in `package.json` and `package-lock.json`.
+- Bump rule from pushed commit messages:
+  - `#major` or `BREAKING CHANGE` or `!:` -> major
+  - `#minor` -> minor
+  - default (or `#patch`) -> patch
+- If multiple markers exist in the pushed commit range, priority is `major > minor > patch`.
 - After bumping, `auto-version-bump.yml` triggers `release.yml` and `npm-publish.yml` via workflow dispatch.
 - `release.yml` creates a release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.

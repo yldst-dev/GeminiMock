@@ -30,12 +30,39 @@ jobs:
         with:
           node-version: 20
 
-      - name: Bump patch version
+      - name: Determine bump type
+        id: plan
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          RANGE=""
+          if [ "$EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [ "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="$EVENT_BEFORE..${GITHUB_SHA}"
+          fi
+          if [ -n "$RANGE" ]; then
+            MESSAGES=$(git log --format=%B "$RANGE")
+          else
+            MESSAGES=$(git log --format=%B -n 20)
+          fi
+          BUMP="patch"
+          if echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#major([[:space:]]|$)|BREAKING CHANGE|!:'; then
+            BUMP="major"
+          elif echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#minor([[:space:]]|$)'; then
+            BUMP="minor"
+          elif echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#patch([[:space:]]|$)'; then
+            BUMP="patch"
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version
         id: bump
-        run: npm version patch --no-git-tag-version
+        run: npm version "${{ steps.plan.outputs.bump }}" --no-git-tag-version
 
       - name: Commit and push version files
         id: commit
+        env:
+          BUMP_KIND: ${{ steps.plan.outputs.bump }}
         run: |
           if git diff --quiet package.json package-lock.json; then
             echo "No version file changes detected"
@@ -46,7 +73,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
-          git commit -m "chore: bump version to ${VERSION}"
+          git commit -m "chore: bump ${BUMP_KIND} version to ${VERSION}"
           git push origin HEAD:main
           echo "pushed=true" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
