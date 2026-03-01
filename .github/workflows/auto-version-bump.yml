@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: auto-version-bump-${{ github.ref }}
@@ -30,12 +31,15 @@ jobs:
           node-version: 20
 
       - name: Bump patch version
+        id: bump
         run: npm version patch --no-git-tag-version
 
       - name: Commit and push version files
+        id: commit
         run: |
           if git diff --quiet package.json package-lock.json; then
             echo "No version file changes detected"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           VERSION=$(node -e "console.log(require('./package.json').version)")
@@ -44,3 +48,17 @@ jobs:
           git add package.json package-lock.json
           git commit -m "chore: bump version to ${VERSION}"
           git push origin HEAD:main
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger release workflow
+        if: steps.commit.outputs.pushed == 'true'
+        run: gh workflow run release.yml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Trigger npm publish workflow
+        if: steps.commit.outputs.pushed == 'true'
+        run: gh workflow run npm-publish.yml --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -296,7 +296,8 @@ Troubleshooting steps:
 ## GitHub Release Automation
 
 - On push to `main`, `auto-version-bump.yml` automatically increments the patch version in `package.json` and `package-lock.json`.
-- The version-bump commit triggers `release.yml`, which creates a release tag `v<version>` if it does not exist.
+- After bumping, `auto-version-bump.yml` triggers `release.yml` and `npm-publish.yml` via workflow dispatch.
+- `release.yml` creates a release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.
 - On each push to `main`, `npm-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
 - Normal workflow: commit and push to `main`; version bump, release, and npm publish run automatically.
