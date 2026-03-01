@@ -295,10 +295,11 @@ Troubleshooting steps:
 
 ## GitHub Release Automation
 
-- On push to `main`, GitHub Actions reads `package.json` version and creates a release tag `v<version>` if it does not exist.
+- On push to `main`, `auto-version-bump.yml` automatically increments the patch version in `package.json` and `package-lock.json`.
+- The version-bump commit triggers `release.yml`, which creates a release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.
 - On each push to `main`, `npm-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
-- To publish a new npm release: bump `package.json` version, commit, and push to `main`.
+- Normal workflow: commit and push to `main`; version bump, release, and npm publish run automatically.
 
 Trusted Publisher setup values for npm:
 
