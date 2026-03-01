@@ -293,7 +293,7 @@ Troubleshooting steps:
 
 - On push to `main`, GitHub Actions reads `package.json` version and creates a release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.
-- After the `release` workflow completes, `npm-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
+- On each push to `main`, `npm-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
 - To publish a new npm release: bump `package.json` version, commit, and push to `main`.
 
 Trusted Publisher setup values for npm:

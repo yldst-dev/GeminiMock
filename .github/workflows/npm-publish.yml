@@ -1,11 +1,9 @@
 name: npm-publish
 
 on:
-  workflow_run:
-    workflows:
-      - release
-    types:
-      - completed
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -13,19 +11,16 @@ permissions:
   id-token: write
 
 concurrency:
-  group: npm-publish-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  group: npm-publish-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -47,13 +42,6 @@ jobs:
         run: |
           VERSION=$(node -e "console.log(require('./package.json').version)")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Ensure release tag exists
-        run: |
-          gh release view "${{ steps.version.outputs.tag }}" --repo "${{ github.repository }}"
-        env:
-          GH_TOKEN: ${{ github.token }}
 
       - name: Check if version is already published
         id: published
