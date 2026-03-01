@@ -9,7 +9,7 @@
 - `src/server/` contains Fastify app routes and background service manager.
 - `test/` mirrors runtime domains (`test/auth`, `test/openai`, `test/server`, etc.).
 - `dist/` is generated output only; do not edit manually.
-- `.github/workflows/` contains auto version bump, release, and npm publish automation.
+- `.github/workflows/` contains unified release and npm publish automation.
 
 ## Bun-First Defaults (Migrated from CLAUDE.md)
 - Prefer Bun commands by default:
@@ -57,7 +57,7 @@
 - `#major`, `BREAKING CHANGE`, or `!:` => major bump.
 - `#minor` => minor bump.
 - default or `#patch` => patch bump.
-- After bump, workflows trigger release tagging and npm trusted publish.
+- After bump, the unified workflow handles release tagging and npm trusted publish.
 
 ## Security & Configuration Tips
 - Never commit OAuth tokens, client secrets, or local credential files.

@@ -1,0 +1,130 @@
+name: release-publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-and-publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Determine bump type
+        id: plan
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          RANGE=""
+          if [ "$EVENT_NAME" = "push" ] && [ -n "$EVENT_BEFORE" ] && [ "$EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="$EVENT_BEFORE..${GITHUB_SHA}"
+          fi
+          if [ -n "$RANGE" ]; then
+            MESSAGES=$(git log --format=%B "$RANGE")
+          else
+            MESSAGES=$(git log --format=%B -n 20)
+          fi
+          BUMP="patch"
+          if echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#major([[:space:]]|$)|BREAKING CHANGE|!:'; then
+            BUMP="major"
+          elif echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#minor([[:space:]]|$)'; then
+            BUMP="minor"
+          elif echo "$MESSAGES" | grep -Eiq '(^|[[:space:]])#patch([[:space:]]|$)'; then
+            BUMP="patch"
+          fi
+          echo "bump=$BUMP" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version
+        id: bump
+        env:
+          BUMP_KIND: ${{ steps.plan.outputs.bump }}
+        run: |
+          npm version "$BUMP_KIND" --no-git-tag-version
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore: bump ${BUMP_KIND} version to ${VERSION} [skip ci]"
+          git push origin HEAD:main
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Upgrade npm for Trusted Publishing
+        run: |
+          npm i -g npm@latest
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check if version is already published
+        id: published
+        run: |
+          if npm view "geminimock@${{ steps.bump.outputs.version }}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify release build
+        if: steps.published.outputs.exists == 'false'
+        run: npm run verify:release
+
+      - name: Clear npm token auth
+        if: steps.published.outputs.exists == 'false'
+        run: |
+          npm config delete //registry.npmjs.org/:_authToken || true
+
+      - name: Publish to npm
+        if: steps.published.outputs.exists == 'false'
+        run: |
+          unset NODE_AUTH_TOKEN
+          unset NPM_TOKEN
+          npm publish --access public --provenance
+
+      - name: Check if release tag exists
+        id: tag
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.bump.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
+          target_commitish: ${{ steps.bump.outputs.head_sha }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

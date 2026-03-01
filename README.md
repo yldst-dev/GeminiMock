@@ -295,16 +295,16 @@ Troubleshooting steps:
 
 ## GitHub Release Automation
 
-- On push to `main`, `auto-version-bump.yml` automatically bumps version in `package.json` and `package-lock.json`.
+- On push to `main`, `release-publish.yml` runs a single pipeline for version bump, npm publish, and GitHub release.
 - Bump rule from pushed commit messages:
   - `#major` or `BREAKING CHANGE` or `!:` -> major
   - `#minor` -> minor
   - default (or `#patch`) -> patch
 - If multiple markers exist in the pushed commit range, priority is `major > minor > patch`.
-- After bumping, `auto-version-bump.yml` triggers `release.yml` and `npm-publish.yml` via workflow dispatch.
-- `release.yml` creates a release tag `v<version>` if it does not exist.
+- The workflow commits `package.json` and `package-lock.json` with `[skip ci]` to avoid duplicate runs from the bump commit.
+- `release-publish.yml` creates release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.
-- On each push to `main`, `npm-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
+- `release-publish.yml` publishes to npm using Trusted Publishing (OIDC) if that version is not already published.
 - Normal workflow: commit and push to `main`; version bump, release, and npm publish run automatically.
 
 Trusted Publisher setup values for npm:
@@ -312,5 +312,5 @@ Trusted Publisher setup values for npm:
 - Publisher: `GitHub Actions`
 - Organization or user: `yldst-dev`
 - Repository: `GeminiMock`
-- Workflow filename: `npm-publish.yml`
+- Workflow filename: `release-publish.yml`
 - Environment name: leave empty
