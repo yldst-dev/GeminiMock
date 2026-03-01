@@ -59,7 +59,7 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
     if (name === "return" || name === "enter") {
       return "enter";
     }
-    if (name === "escape" || (key.ctrl && name === "c")) {
+    if (key.ctrl && name === "c") {
       return "cancel";
     }
     return null;
@@ -135,7 +135,7 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
       stdin.setRawMode(true);
       process.stdout.write("\u001b[?25l");
       keyQueue.length = 0;
-      ignoreLoginKeysUntil = Date.now() + 250;
+      ignoreLoginKeysUntil = Date.now() + 1000;
     }
   };
 

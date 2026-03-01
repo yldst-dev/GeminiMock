@@ -63,4 +63,15 @@ describe("runAuthLoginFlow", () => {
     expect(lines).toContain("OAuth login succeeded: two@example.com");
     expect(lines).toContain("Login flow finished");
   });
+
+  it("ignores one immediate cancel right after login completes", async () => {
+    const io = createIO(["enter", "cancel", "down", "enter"]);
+    const doLogin = vi.fn(async () => ({ email: "one@example.com" }));
+
+    const lines = await runAuthLoginFlow({ io, doLogin });
+
+    expect(doLogin).toHaveBeenCalledTimes(1);
+    expect(lines).toContain("OAuth login succeeded: one@example.com");
+    expect(lines).toContain("Login flow finished");
+  });
 });

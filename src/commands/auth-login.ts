@@ -32,7 +32,7 @@ function renderStartScreen(index: number): string {
     "+------------------------------------------------------------+",
     "| GeminiMock Login Selector                                 |",
     "+------------------------------------------------------------+",
-    "Use Up/Down to move, Enter to select, Esc/Ctrl+C to cancel",
+    "Use Up/Down to move, Enter to select, Ctrl+C to cancel",
     ""
   ];
   for (let i = 0; i < options.length; i += 1) {
@@ -78,6 +78,7 @@ export async function runAuthLoginFlow(options: RunAuthLoginFlowOptions): Promis
 
   const lines: string[] = [];
   let state: ScreenState = { kind: "start", index: 0 };
+  let ignoreNextCancelOnAfter = false;
 
   while (true) {
     io.clear();
@@ -105,11 +106,13 @@ export async function runAuthLoginFlow(options: RunAuthLoginFlowOptions): Promis
       }
       const result = await doLogin();
       lines.push(successLine(result));
+      ignoreNextCancelOnAfter = true;
       state = { kind: "after", index: 0, lastLoginAccount: loginAccountLabel(result) };
       continue;
     }
 
     if (key === "up") {
+      ignoreNextCancelOnAfter = false;
       state = {
         kind: "after",
         index: moveIndex(state.index, -1, 2),
@@ -118,6 +121,7 @@ export async function runAuthLoginFlow(options: RunAuthLoginFlowOptions): Promis
       continue;
     }
     if (key === "down") {
+      ignoreNextCancelOnAfter = false;
       state = {
         kind: "after",
         index: moveIndex(state.index, 1, 2),
@@ -126,12 +130,18 @@ export async function runAuthLoginFlow(options: RunAuthLoginFlowOptions): Promis
       continue;
     }
     if (key === "cancel") {
+      if (ignoreNextCancelOnAfter) {
+        ignoreNextCancelOnAfter = false;
+        continue;
+      }
       lines.push("Login flow finished");
       return lines;
     }
     if (state.index === 0) {
+      ignoreNextCancelOnAfter = false;
       const result = await doLogin();
       lines.push(successLine(result));
+      ignoreNextCancelOnAfter = true;
       state = { kind: "after", index: 0, lastLoginAccount: loginAccountLabel(result) };
       continue;
     }
