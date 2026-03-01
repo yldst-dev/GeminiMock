@@ -32,7 +32,7 @@ function renderStartScreen(index: number): string {
     "+------------------------------------------------------------+",
     "| GeminiMock Login Selector                                 |",
     "+------------------------------------------------------------+",
-    "Use Up/Down to move, Enter to select, Q/Esc to cancel",
+    "Use Up/Down to move, Enter to select, Esc/Ctrl+C to cancel",
     ""
   ];
   for (let i = 0; i < options.length; i += 1) {

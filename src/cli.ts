@@ -46,6 +46,7 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
 
   const keyQueue: LoginKey[] = [];
   let keyResolver: ((key: LoginKey) => void) | null = null;
+  let ignoreLoginKeysUntil = 0;
 
   function mapKeypressToLoginKey(key: { name?: string; ctrl?: boolean }): LoginKey | null {
     const name = key.name?.toLowerCase();
@@ -58,13 +59,16 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
     if (name === "return" || name === "enter") {
       return "enter";
     }
-    if (name === "escape" || name === "q" || (key.ctrl && name === "c")) {
+    if (name === "escape" || (key.ctrl && name === "c")) {
       return "cancel";
     }
     return null;
   }
 
   const onKeypress = (_str: string, key: { name?: string; ctrl?: boolean }) => {
+    if (Date.now() < ignoreLoginKeysUntil) {
+      return;
+    }
     const mapped = mapKeypressToLoginKey(key);
     if (!mapped) {
       return;
@@ -130,6 +134,8 @@ async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
       stdin.on("keypress", onKeypress);
       stdin.setRawMode(true);
       process.stdout.write("\u001b[?25l");
+      keyQueue.length = 0;
+      ignoreLoginKeysUntil = Date.now() + 250;
     }
   };
 

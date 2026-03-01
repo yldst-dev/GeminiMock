@@ -89,7 +89,7 @@ Installed CLI command:
 4. On SSH/headless Linux/CI environments, login automatically falls back to manual code flow instead of waiting on localhost callback timeout
 5. Use `geminimock auth login --manual` to force manual flow, `--web` to force localhost callback flow
 6. OAuth client config is resolved in this order: explicit env vars, installed Gemini CLI auto-discovery, bundled gemini-cli-core discovery
-7. `auth login` uses keyboard TUI (`Up/Down`, `Enter`, `Q/Esc`) to start login, repeat login, or finish
+7. `auth login` uses keyboard TUI (`Up/Down`, `Enter`, `Esc/Ctrl+C`) to start login, repeat login, or finish
 8. `Login Completed` screen shows `Last login account: <email>`
 9. `auth logout` uses keyboard TUI (`Up/Down`, `Enter`, `Q/Esc`) to choose which account to logout
 10. In the logout list, `[*]` means the current active account
