@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { OAuth2Client, CodeChallengeMethod, type Credentials } from "google-auth-library";
 
@@ -18,9 +19,7 @@ export const GEMINI_CLI_OAUTH_SCOPE = [
   "https://www.googleapis.com/auth/userinfo.profile"
 ] as const;
 const GEMINI_CLI_OAUTH_PROMPT = "consent select_account";
-const BUILTIN_GEMINI_OAUTH_CLIENT_ID =
-  "1073289179617-f9lhe1dk1lceh0ohl3p00qvvk34l4n93.apps.googleusercontent.com";
-const BUILTIN_GEMINI_OAUTH_CLIENT_SECRET = "d-FL95Q19V0wGuN-3sK6Hjeu";
+const require = createRequire(import.meta.url);
 
 type OAuthClientConfig = {
   clientId: string;
@@ -162,6 +161,16 @@ function discoverFromGlobalNpmRoot(): OAuthClientConfig | null {
   }
 }
 
+function discoverFromBundledGeminiCliCore(): OAuthClientConfig | null {
+  try {
+    const geminiCliCorePackageJson = require.resolve("@google/gemini-cli-core/package.json");
+    const geminiCliCoreDir = path.dirname(geminiCliCorePackageJson);
+    return readConfigFromSourceFile(path.join(geminiCliCoreDir, "dist/src/code_assist/oauth2.js"));
+  } catch {
+    return null;
+  }
+}
+
 function discoverDefaultClientConfig(): OAuthClientConfig | null {
   if (process.env.GEMINI_CLI_OAUTH_AUTO_DISCOVERY === "0") {
     return null;
@@ -176,7 +185,11 @@ function discoverDefaultClientConfig(): OAuthClientConfig | null {
     return discoveredClientConfig;
   }
 
-  discoveredClientConfig = discoverFromGeminiBinary() ?? discoverFromGlobalNpmRoot() ?? null;
+  discoveredClientConfig =
+    discoverFromGeminiBinary()
+    ?? discoverFromBundledGeminiCliCore()
+    ?? discoverFromGlobalNpmRoot()
+    ?? null;
   return discoveredClientConfig;
 }
 
@@ -185,7 +198,7 @@ function resolveClientId(): string | undefined {
   if (envClientId) {
     return envClientId;
   }
-  return discoverDefaultClientConfig()?.clientId ?? BUILTIN_GEMINI_OAUTH_CLIENT_ID;
+  return discoverDefaultClientConfig()?.clientId;
 }
 
 function resolveClientSecret(): string | undefined {
@@ -193,7 +206,7 @@ function resolveClientSecret(): string | undefined {
   if (envClientSecret) {
     return envClientSecret;
   }
-  return discoverDefaultClientConfig()?.clientSecret ?? BUILTIN_GEMINI_OAUTH_CLIENT_SECRET;
+  return discoverDefaultClientConfig()?.clientSecret;
 }
 
 export function hasConfiguredOAuthClient(): boolean {
@@ -204,7 +217,7 @@ export function createOAuthClient(): OAuth2Client {
   const clientId = resolveClientId();
   if (!clientId) {
     throw new Error(
-      "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID or install Gemini CLI."
+      "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID or reinstall geminimock."
     );
   }
   return new OAuth2Client({
