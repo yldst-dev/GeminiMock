@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { OAuth2Client, CodeChallengeMethod, type Credentials } from "google-auth-library";
 
@@ -18,6 +18,9 @@ export const GEMINI_CLI_OAUTH_SCOPE = [
   "https://www.googleapis.com/auth/userinfo.profile"
 ] as const;
 const GEMINI_CLI_OAUTH_PROMPT = "consent select_account";
+const BUILTIN_GEMINI_OAUTH_CLIENT_ID =
+  "1073289179617-f9lhe1dk1lceh0ohl3p00qvvk34l4n93.apps.googleusercontent.com";
+const BUILTIN_GEMINI_OAUTH_CLIENT_SECRET = "d-FL95Q19V0wGuN-3sK6Hjeu";
 
 type OAuthClientConfig = {
   clientId: string;
@@ -77,15 +80,52 @@ function findConfigInDirectory(baseDir: string): OAuthClientConfig | null {
   return null;
 }
 
-function discoverFromGeminiBinary(): OAuthClientConfig | null {
-  let binaryPath = process.env.GEMINI_CLI_BIN_PATH?.trim();
-  if (!binaryPath) {
-    try {
-      binaryPath = execFileSync("which", ["gemini"], { encoding: "utf8" }).trim();
-    } catch {
-      return null;
+function isExecutableFile(filePath: string): boolean {
+  if (!existsSync(filePath)) {
+    return false;
+  }
+  if (process.platform === "win32") {
+    return true;
+  }
+  try {
+    accessSync(filePath, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveGeminiBinaryPath(): string | null {
+  const configuredPath = process.env.GEMINI_CLI_BIN_PATH?.trim();
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const pathValue = process.env.PATH;
+  if (!pathValue) {
+    return null;
+  }
+
+  const searchPaths = pathValue.split(path.delimiter).filter(Boolean);
+  const executableNames = process.platform === "win32"
+    ? (process.env.PATHEXT?.split(";").filter(Boolean) ?? [".exe", ".cmd", ".bat"]).map(
+        (ext) => `gemini${ext}`
+      )
+    : ["gemini"];
+
+  for (const searchPath of searchPaths) {
+    for (const executableName of executableNames) {
+      const candidate = path.join(searchPath, executableName);
+      if (isExecutableFile(candidate)) {
+        return candidate;
+      }
     }
   }
+  return null;
+}
+
+function discoverFromGeminiBinary(): OAuthClientConfig | null {
+  const binaryPath = resolveGeminiBinaryPath();
   if (!binaryPath) {
     return null;
   }
@@ -145,7 +185,7 @@ function resolveClientId(): string | undefined {
   if (envClientId) {
     return envClientId;
   }
-  return discoverDefaultClientConfig()?.clientId;
+  return discoverDefaultClientConfig()?.clientId ?? BUILTIN_GEMINI_OAUTH_CLIENT_ID;
 }
 
 function resolveClientSecret(): string | undefined {
@@ -153,7 +193,7 @@ function resolveClientSecret(): string | undefined {
   if (envClientSecret) {
     return envClientSecret;
   }
-  return discoverDefaultClientConfig()?.clientSecret;
+  return discoverDefaultClientConfig()?.clientSecret ?? BUILTIN_GEMINI_OAUTH_CLIENT_SECRET;
 }
 
 export function hasConfiguredOAuthClient(): boolean {

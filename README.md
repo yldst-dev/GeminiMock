@@ -75,6 +75,7 @@ Installed CLI command:
 - `GEMINI_CLI_OAUTH_SOURCE_PATH` optional explicit path to Gemini CLI `oauth2.js` for auto-discovery
 - `GEMINI_CLI_OAUTH_AUTO_DISCOVERY` default: `1` (`0` disables Gemini CLI client auto-discovery)
 - `GEMINI_CLI_BIN_PATH` optional explicit path to `gemini` executable
+- OAuth client falls back to a built-in Gemini Code Assist desktop client when no env or discovered config is available
 - `GEMINIMOCK_OAUTH_LOGIN_MODE` optional: `auto` (default), `manual`, `web`
 - `GEMINIMOCK_OAUTH_FORCE_MANUAL` optional: `1` forces manual login flow
 - `GOOGLE_CLOUD_PROJECT` optional
@@ -87,7 +88,7 @@ Installed CLI command:
 3. If callback cannot complete, paste the authorization code or callback URL in terminal
 4. On SSH/headless Linux/CI environments, login automatically falls back to manual code flow instead of waiting on localhost callback timeout
 5. Use `geminimock auth login --manual` to force manual flow, `--web` to force localhost callback flow
-6. OAuth client config is resolved in this order: explicit env vars, installed Gemini CLI auto-discovery
+6. OAuth client config is resolved in this order: explicit env vars, installed Gemini CLI auto-discovery, built-in fallback client
 7. `auth login` uses keyboard TUI (`Up/Down`, `Enter`, `Q/Esc`) to start login, repeat login, or finish
 8. `Login Completed` screen shows `Last login account: <email>`
 9. `auth logout` uses keyboard TUI (`Up/Down`, `Enter`, `Q/Esc`) to choose which account to logout

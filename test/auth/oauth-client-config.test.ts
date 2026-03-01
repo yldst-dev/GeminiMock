@@ -93,4 +93,21 @@ describe("oauth client config", () => {
       await rm(path.dirname(sourceFile), { recursive: true, force: true });
     }
   });
+
+  it("uses built-in OAuth client defaults when env and discovery are unavailable", async () => {
+    delete process.env.GEMINI_CLI_OAUTH_CLIENT_ID;
+    delete process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET;
+    delete process.env.GEMINI_CLI_OAUTH_SOURCE_PATH;
+    delete process.env.GEMINI_CLI_BIN_PATH;
+    process.env.GEMINI_CLI_OAUTH_AUTO_DISCOVERY = "0";
+    vi.resetModules();
+    const module = await import("../../src/auth/oauth-flow.js");
+    const request = await module.buildManualOAuthRequest();
+    const url = new URL(request.authUrl);
+    expect(module.hasConfiguredOAuthClient()).toBe(true);
+    expect(url.searchParams.get("client_id")).toBe(
+      "1073289179617-f9lhe1dk1lceh0ohl3p00qvvk34l4n93.apps.googleusercontent.com"
+    );
+    expect(() => module.createOAuthClient()).not.toThrow();
+  });
 });
