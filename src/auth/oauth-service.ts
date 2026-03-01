@@ -20,6 +20,10 @@ import {
 import type { CodeAssistApiError } from "../gemini/errors.js";
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const OAUTH_LOGIN_MODE_ENV = "GEMINIMOCK_OAUTH_LOGIN_MODE";
+const OAUTH_FORCE_MANUAL_ENV = "GEMINIMOCK_OAUTH_FORCE_MANUAL";
+
+export type OAuthLoginMode = "auto" | "manual" | "web";
 
 export type OAuthServiceIO = {
   write(message: string): void;
@@ -154,6 +158,53 @@ async function openExternalUrl(url: string): Promise<boolean> {
   });
 }
 
+function parseLoginMode(value: string | undefined): OAuthLoginMode | undefined {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "manual") {
+    return "manual";
+  }
+  if (normalized === "web") {
+    return "web";
+  }
+  if (normalized === "auto") {
+    return "auto";
+  }
+  return undefined;
+}
+
+function isHeadlessOrRemoteEnvironment(): boolean {
+  if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
+    return true;
+  }
+  if (process.env.CI === "1" || process.env.CI === "true") {
+    return true;
+  }
+  if (process.env[OAUTH_FORCE_MANUAL_ENV] === "1") {
+    return true;
+  }
+  if (process.platform === "linux") {
+    const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY || process.env.MIR_SOCKET);
+    if (!hasDisplay) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function resolveOAuthLoginMode(requestedMode: OAuthLoginMode = "auto"): OAuthLoginMode {
+  if (requestedMode !== "auto") {
+    return requestedMode;
+  }
+  const envMode = parseLoginMode(process.env[OAUTH_LOGIN_MODE_ENV]);
+  if (envMode && envMode !== "auto") {
+    return envMode;
+  }
+  if (isHeadlessOrRemoteEnvironment()) {
+    return "manual";
+  }
+  return "auto";
+}
+
 type CallbackPayload = {
   code: string;
   state?: string;
@@ -274,9 +325,18 @@ export class OAuthService {
     return this.store.removeAccount(idOrEmail);
   }
 
-  async login(io: OAuthServiceIO = defaultIO()): Promise<{ email?: string }> {
+  async login(io: OAuthServiceIO = defaultIO(), mode: OAuthLoginMode = "auto"): Promise<{ email?: string }> {
     if (!hasConfiguredOAuthClient()) {
       throw new Error("OAuth client is not configured.");
+    }
+
+    const resolvedMode = resolveOAuthLoginMode(mode);
+    if (resolvedMode === "manual") {
+      io.write("Using manual authorization code flow.\n\n");
+      return this.loginManual(io);
+    }
+    if (resolvedMode === "web") {
+      return this.loginWithWebCallback(io);
     }
 
     try {
@@ -298,7 +358,7 @@ export class OAuthService {
     try {
       const opened = await openExternalUrl(request.authUrl);
       if (!opened) {
-        io.write("Could not open browser automatically. Open this URL manually:\n");
+        throw new Error("Unable to open browser for localhost callback flow");
       }
       io.write(`${request.authUrl}\n\n`);
       io.write("Waiting for OAuth callback...\n");

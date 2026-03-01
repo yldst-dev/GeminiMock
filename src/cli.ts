@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { emitKeypressEvents } from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
 import { createAccountStore } from "./auth/account-store.js";
-import { OAuthService } from "./auth/oauth-service.js";
+import { OAuthService, type OAuthLoginMode } from "./auth/oauth-service.js";
 import { runAuthLoginFlow, type LoginKey, type LoginTuiIO } from "./commands/auth-login.js";
 import { runAuthLogoutFlow, type LogoutKey, type LogoutTuiIO } from "./commands/auth-logout.js";
 import { loadEnv } from "./config/env.js";
@@ -22,7 +22,7 @@ function usage() {
       "  geminimock server start",
       "  geminimock server stop",
       "  geminimock server status",
-      "  geminimock auth login",
+      "  geminimock auth login [--manual|--web]",
       "  geminimock auth logout [--all]",
       "  geminimock auth accounts list",
       "  geminimock auth accounts use <id|email>",
@@ -33,13 +33,13 @@ function usage() {
   );
 }
 
-async function runAuthLogin(singleOnly = false) {
+async function runAuthLogin(singleOnly = false, mode: OAuthLoginMode = "auto") {
   const env = loadEnv();
   const store = createAccountStore(env.accountsPath, env.oauthPath, env.oauthFallbackPath);
   const oauthService = new OAuthService(store);
   const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (singleOnly || !isTTY) {
-    const result = await oauthService.login();
+    const result = await oauthService.login(undefined, mode);
     process.stdout.write(`OAuth login succeeded${result.email ? `: ${result.email}` : ""}\n`);
     return;
   }
@@ -124,7 +124,7 @@ async function runAuthLogin(singleOnly = false) {
             rl.close();
           }
         }
-      });
+      }, mode);
     } finally {
       emitKeypressEvents(stdin);
       stdin.on("keypress", onKeypress);
@@ -403,7 +403,13 @@ async function main() {
   }
 
   if (args[0] === "auth" && args[1] === "login") {
-    await runAuthLogin(args.includes("--single"));
+    const manual = args.includes("--manual");
+    const web = args.includes("--web");
+    if (manual && web) {
+      throw new Error("Use either --manual or --web, not both");
+    }
+    const mode: OAuthLoginMode = manual ? "manual" : web ? "web" : "auto";
+    await runAuthLogin(args.includes("--single"), mode);
     return;
   }
 
