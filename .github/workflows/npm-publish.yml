@@ -68,6 +68,14 @@ jobs:
         if: steps.published.outputs.exists == 'false'
         run: npm run verify:release
 
+      - name: Clear npm token auth
+        if: steps.published.outputs.exists == 'false'
+        run: |
+          npm config delete //registry.npmjs.org/:_authToken || true
+
       - name: Publish to npm
         if: steps.published.outputs.exists == 'false'
         run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ""
+          NPM_TOKEN: ""
