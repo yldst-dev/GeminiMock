@@ -2,6 +2,71 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/server/app.js";
 
 describe("chat completions route", () => {
+  it("accepts all optional request arguments", async () => {
+    let capturedRequest: unknown;
+    const app = await createApp({
+      chatService: {
+        generate: async (request) => {
+          capturedRequest = request;
+          return {
+            id: "id-1",
+            object: "chat.completion",
+            created: 1,
+            model: "gemini-2.5-pro",
+            choices: [
+              {
+                index: 0,
+                finish_reason: "stop",
+                message: { role: "assistant", content: "ok" }
+              }
+            ],
+            usage: {
+              prompt_tokens: 1,
+              completion_tokens: 1,
+              total_tokens: 2
+            }
+          };
+        }
+      }
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/chat/completions",
+      payload: {
+        model: "gemini-3-flash",
+        stream: false,
+        temperature: 0.4,
+        top_p: 0.7,
+        max_tokens: 512,
+        stop: ["<END>", "DONE"],
+        thinking_level: "high",
+        thinking_config: {
+          include_thoughts: true,
+          thinking_budget: 4096
+        },
+        safety_settings: [{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" }],
+        messages: [{ role: "user", content: "hello" }]
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(capturedRequest).toMatchObject({
+      model: "gemini-3-flash",
+      stream: false,
+      temperature: 0.4,
+      top_p: 0.7,
+      max_tokens: 512,
+      stop: ["<END>", "DONE"],
+      thinking_level: "high",
+      thinking_config: {
+        include_thoughts: true,
+        thinking_budget: 4096
+      },
+      safety_settings: [{ category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" }]
+    });
+  });
+
   it("returns completion", async () => {
     const app = await createApp({
       chatService: {

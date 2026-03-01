@@ -18,7 +18,12 @@ describe("OpenAI mapper", () => {
         temperature: 0.2,
         top_p: 0.9,
         max_tokens: 128,
-        stop: ["END"]
+        stop: ["END"],
+        thinking_level: "high",
+        safety_settings: [
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+        ]
       },
       { projectId: "p1" }
     );
@@ -28,7 +33,70 @@ describe("OpenAI mapper", () => {
     expect(out.request.systemInstruction?.parts?.[0]?.text).toBe("system");
     expect(out.request.contents.length).toBe(3);
     expect(out.request.contents[1]?.role).toBe("model");
+    expect(out.request.generationConfig?.temperature).toBe(0.2);
     expect(out.request.generationConfig?.maxOutputTokens).toBe(128);
+    expect(out.request.generationConfig?.thinkingConfig).toEqual({ thinkingLevel: "HIGH" });
+    expect(out.request.safetySettings).toEqual([
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+    ]);
+  });
+
+  it("maps thinking config options", () => {
+    const out = mapOpenAIToCodeAssist(
+      {
+        model: "gemini-2.5-flash",
+        messages: [{ role: "user", content: "hello" }],
+        thinkingLevel: "medium",
+        thinkingConfig: {
+          includeThoughts: false,
+          thinkingBudget: 1024
+        }
+      },
+      { projectId: "p1" }
+    );
+
+    expect(out.request.generationConfig?.thinkingConfig).toEqual({
+      includeThoughts: false,
+      thinkingBudget: 1024,
+      thinkingLevel: "MEDIUM"
+    });
+  });
+
+  it("maps snake_case thinking_config options", () => {
+    const out = mapOpenAIToCodeAssist(
+      {
+        model: "gemini-3-flash",
+        messages: [{ role: "user", content: "hello" }],
+        thinking_config: {
+          include_thoughts: true,
+          thinking_budget: 8192,
+          thinking_level: "low"
+        }
+      },
+      { projectId: "p1" }
+    );
+
+    expect(out.request.generationConfig?.thinkingConfig).toEqual({
+      includeThoughts: true,
+      thinkingBudget: 8192,
+      thinkingLevel: "LOW"
+    });
+  });
+
+  it("maps camelCase safetySettings", () => {
+    const out = mapOpenAIToCodeAssist(
+      {
+        model: "gemini-2.5-flash",
+        messages: [{ role: "user", content: "hello" }],
+        safetySettings: [{ category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }]
+      },
+      { projectId: "p1" }
+    );
+
+    expect(out.request.safetySettings).toEqual([
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+    ]);
   });
 
   it("maps code assist response to openai response", () => {

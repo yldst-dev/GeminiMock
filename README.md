@@ -193,6 +193,84 @@ curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
   -d '{"model":"gemini-2.5-flash","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+Request with common options:
+
+```bash
+curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model":"gemini-2.5-flash",
+    "temperature":0.2,
+    "thinking_level":"high",
+    "safety_settings":[
+      {"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_ONLY_HIGH"},
+      {"category":"HARM_CATEGORY_HATE_SPEECH","threshold":"BLOCK_ONLY_HIGH"}
+    ],
+    "messages":[{"role":"user","content":"Hello"}]
+  }'
+```
+
+Request with all supported optional arguments:
+
+```bash
+curl -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{
+    "model":"gemini-3-flash",
+    "stream":false,
+    "temperature":0.6,
+    "top_p":0.7,
+    "max_tokens":2048,
+    "stop":["<END>","DONE"],
+    "thinking_level":"high",
+    "thinking_config":{
+      "include_thoughts":true,
+      "thinking_budget":8192
+    },
+    "safety_settings":[
+      {"category":"HARM_CATEGORY_HARASSMENT","threshold":"BLOCK_NONE"},
+      {"category":"HARM_CATEGORY_HATE_SPEECH","threshold":"BLOCK_NONE"},
+      {"category":"HARM_CATEGORY_SEXUALLY_EXPLICIT","threshold":"BLOCK_NONE"},
+      {"category":"HARM_CATEGORY_DANGEROUS_CONTENT","threshold":"BLOCK_NONE"},
+      {"category":"HARM_CATEGORY_CIVIC_INTEGRITY","threshold":"BLOCK_NONE"}
+    ],
+    "messages":[
+      {"role":"system","content":"You are concise."},
+      {"role":"user","content":"Hello"}
+    ]
+  }'
+```
+
+Supported request arguments (`POST /v1/chat/completions`):
+
+- `model` optional `string`: model id. If omitted, server default model is used.
+- `messages` required `array`: at least one message.
+- `messages[].role` `system | user | assistant | developer | tool`.
+- `messages[].content` `string | {type:\"text\",text:string}[]`.
+- `stream` optional `boolean`: if `true`, returns SSE stream.
+- `temperature` optional `number`: mapped to `generationConfig.temperature`.
+- `top_p` optional `number`: mapped to `generationConfig.topP`.
+- `max_tokens` optional `integer`: mapped to `generationConfig.maxOutputTokens`.
+- `stop` optional `string | string[]`: mapped to `generationConfig.stopSequences`.
+- `thinking_level` or `thinkingLevel` optional `string`: mapped to `generationConfig.thinkingConfig.thinkingLevel`.
+- `thinking_config` or `thinkingConfig` optional `object`.
+- `thinking_config.include_thoughts` or `thinkingConfig.includeThoughts` optional `boolean`.
+- `thinking_config.thinking_budget` or `thinkingConfig.thinkingBudget` optional `integer`.
+- `thinking_config.thinking_level` or `thinkingConfig.thinkingLevel` optional `string`.
+- `safety_settings` or `safetySettings` optional `array`: mapped to `request.safetySettings`.
+- `safety_settings[].category` required `string`.
+- `safety_settings[].threshold` required `string`.
+- `safety_settings[].method` optional `string`.
+
+Notes:
+
+- `temperature`, `top_p`, `max_tokens`, `stop`, `thinking_level`, and `thinkingConfig` are mapped to Gemini `generationConfig`
+- `thinking_level`/`thinkingLevel` and `thinking_config`/`thinkingConfig` are accepted
+- `safety_settings` is mapped to Gemini `safetySettings`
+- camelCase `safetySettings` is also accepted
+- if both snake_case and camelCase are sent for the same option, snake_case takes precedence
+- `thinking_level` values `low`, `medium`, `high` are normalized to `LOW`, `MEDIUM`, `HIGH`
+
 Basic response format (OpenAI-style):
 
 ```json

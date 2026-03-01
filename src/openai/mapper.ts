@@ -1,4 +1,10 @@
-import type { CAGenerateContentRequest, CaGenerateContentResponse, VertexContent } from "../gemini/types.js";
+import type {
+  CAGenerateContentRequest,
+  CaGenerateContentResponse,
+  VertexContent,
+  VertexSafetySetting,
+  VertexThinkingConfig
+} from "../gemini/types.js";
 import type { OpenAIChatCompletionRequest, OpenAIChatCompletionResponse } from "./types.js";
 
 function normalizeMessageContent(content: string | Array<{ type: "text"; text: string }>): string {
@@ -23,6 +29,54 @@ function normalizeStop(stop: OpenAIChatCompletionRequest["stop"]): string[] | un
     return [stop];
   }
   return stop;
+}
+
+function normalizeSafetySettings(request: OpenAIChatCompletionRequest): VertexSafetySetting[] | undefined {
+  if (request.safety_settings) {
+    return request.safety_settings;
+  }
+  return request.safetySettings;
+}
+
+function normalizeThinkingLevel(level: string | undefined): string | undefined {
+  if (!level) {
+    return undefined;
+  }
+  const trimmed = level.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const normalized = trimmed.toLowerCase();
+  if (normalized === "low" || normalized === "medium" || normalized === "high") {
+    return normalized.toUpperCase();
+  }
+  return trimmed;
+}
+
+function normalizeThinkingConfig(request: OpenAIChatCompletionRequest): VertexThinkingConfig | undefined {
+  const thinkingConfig = request.thinking_config ?? request.thinkingConfig;
+  const includeThoughts = thinkingConfig?.includeThoughts ?? thinkingConfig?.include_thoughts;
+  const thinkingBudget = thinkingConfig?.thinkingBudget ?? thinkingConfig?.thinking_budget;
+  const thinkingLevel =
+    normalizeThinkingLevel(request.thinking_level ?? request.thinkingLevel) ??
+    normalizeThinkingLevel(thinkingConfig?.thinkingLevel ?? thinkingConfig?.thinking_level);
+
+  const config: VertexThinkingConfig = {};
+
+  if (includeThoughts !== undefined) {
+    config.includeThoughts = includeThoughts;
+  }
+  if (thinkingBudget !== undefined) {
+    config.thinkingBudget = thinkingBudget;
+  }
+  if (thinkingLevel !== undefined) {
+    config.thinkingLevel = thinkingLevel;
+  }
+
+  if (Object.keys(config).length === 0) {
+    return undefined;
+  }
+  return config;
 }
 
 export function mapOpenAIToCodeAssist(
@@ -56,11 +110,13 @@ export function mapOpenAIToCodeAssist(
               parts: [{ text: systemMessages.join("\n") }]
             }
           : undefined,
+      safetySettings: normalizeSafetySettings(request),
       generationConfig: {
         temperature: request.temperature,
         topP: request.top_p,
         maxOutputTokens: request.max_tokens,
-        stopSequences: normalizeStop(request.stop)
+        stopSequences: normalizeStop(request.stop),
+        thinkingConfig: normalizeThinkingConfig(request)
       }
     }
   };

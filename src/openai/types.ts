@@ -10,6 +10,21 @@ const messageSchema = z.object({
   content: z.union([z.string(), z.array(contentItemSchema)])
 });
 
+const safetySettingSchema = z.object({
+  category: z.string().min(1),
+  threshold: z.string().min(1),
+  method: z.string().optional()
+});
+
+const thinkingConfigSchema = z.object({
+  include_thoughts: z.boolean().optional(),
+  includeThoughts: z.boolean().optional(),
+  thinking_budget: z.number().int().optional(),
+  thinkingBudget: z.number().int().optional(),
+  thinking_level: z.string().min(1).optional(),
+  thinkingLevel: z.string().min(1).optional()
+});
+
 export const openAIChatCompletionRequestSchema = z.object({
   model: z.string().optional(),
   messages: z.array(messageSchema).min(1),
@@ -17,7 +32,13 @@ export const openAIChatCompletionRequestSchema = z.object({
   temperature: z.number().optional(),
   top_p: z.number().optional(),
   max_tokens: z.number().int().optional(),
-  stop: z.union([z.string(), z.array(z.string())]).optional()
+  stop: z.union([z.string(), z.array(z.string())]).optional(),
+  thinking_level: z.string().min(1).optional(),
+  thinkingLevel: z.string().min(1).optional(),
+  thinking_config: thinkingConfigSchema.optional(),
+  thinkingConfig: thinkingConfigSchema.optional(),
+  safety_settings: z.array(safetySettingSchema).optional(),
+  safetySettings: z.array(safetySettingSchema).optional()
 });
 
 export type OpenAIChatCompletionRequest = z.infer<typeof openAIChatCompletionRequestSchema>;

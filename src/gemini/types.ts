@@ -48,8 +48,14 @@ export type RetrieveUserQuotaResponse = {
   }>;
 };
 
+export type VertexInlineData = {
+  mimeType: string;
+  data: string;
+};
+
 export type VertexPart = {
   text?: string;
+  inlineData?: VertexInlineData;
 };
 
 export type VertexContent = {
@@ -62,6 +68,21 @@ export type VertexGenerationConfig = {
   topP?: number;
   maxOutputTokens?: number;
   stopSequences?: string[];
+  responseModalities?: string[];
+  candidateCount?: number;
+  thinkingConfig?: VertexThinkingConfig;
+};
+
+export type VertexThinkingConfig = {
+  includeThoughts?: boolean;
+  thinkingBudget?: number;
+  thinkingLevel?: string;
+};
+
+export type VertexSafetySetting = {
+  category: string;
+  threshold: string;
+  method?: string;
 };
 
 export type CAGenerateContentRequest = {
@@ -70,6 +91,7 @@ export type CAGenerateContentRequest = {
   request: {
     contents: VertexContent[];
     systemInstruction?: VertexContent;
+    safetySettings?: VertexSafetySetting[];
     generationConfig?: VertexGenerationConfig;
   };
 };
