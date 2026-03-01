@@ -1,0 +1,54 @@
+name: npm-publish
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify package version matches release tag
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "Tag/version mismatch: tag=$TAG package=v$VERSION"
+            exit 1
+          fi
+
+      - name: Verify release build
+        run: npm run verify:release
+
+      - name: Publish to npm
+        run: npm publish --access public --provenance

@@ -2,6 +2,24 @@
 
 OpenAI-compatible chat API server backed by Gemini Code Assist OAuth.
 
+## Terms of Service Warning
+
+> [!CAUTION]
+> Using this project may violate Google's Terms of Service. Some users have reported account suspension or shadow restrictions.
+>
+> High-risk scenarios:
+> - Fresh Google accounts are more likely to be flagged
+> - Newly created accounts with Pro/Ultra subscriptions may be reviewed or restricted quickly
+>
+> By using this project, you acknowledge:
+> - This is an unofficial tool and is not endorsed by Google
+> - Your account access may be limited, suspended, or permanently banned
+> - You accept full responsibility for any risk or loss resulting from use
+>
+> Recommendation:
+> - Prefer an established account that is not critical to your primary services
+> - Avoid creating new accounts specifically for this workflow
+
 ## Install
 
 - global: `npm i -g geminimock`
@@ -275,4 +293,13 @@ Troubleshooting steps:
 
 - On push to `main`, GitHub Actions reads `package.json` version and creates a release tag `v<version>` if it does not exist.
 - Release notes are generated automatically from the merged changes.
-- To publish a new release, bump `package.json` version, commit, and push to `main`.
+- When a GitHub Release is published, `npm-publish.yml` automatically publishes the same tag to npm using Trusted Publishing (OIDC).
+- To publish a new npm release: bump `package.json` version, commit, and push to `main`.
+
+Trusted Publisher setup values for npm:
+
+- Publisher: `GitHub Actions`
+- Organization or user: `yldst-dev`
+- Repository: `GeminiMock`
+- Workflow filename: `npm-publish.yml`
+- Environment name: leave empty

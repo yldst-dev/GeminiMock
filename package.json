@@ -10,6 +10,14 @@
     "README.md"
   ],
   "main": "dist/cli.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yldst-dev/GeminiMock.git"
+  },
+  "homepage": "https://github.com/yldst-dev/GeminiMock#readme",
+  "bugs": {
+    "url": "https://github.com/yldst-dev/GeminiMock/issues"
+  },
   "engines": {
     "node": ">=18.17"
   },
