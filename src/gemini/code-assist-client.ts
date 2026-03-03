@@ -8,7 +8,7 @@ import type {
   OnboardUserRequest,
   RetrieveUserQuotaResponse
 } from "./types.js";
-import { CodeAssistApiError, parseRetryAfterMs } from "./errors.js";
+import { CodeAssistApiError, parseRetryAfterMs, parseRetryAfterMsFromBody } from "./errors.js";
 
 function platformToCode(): string {
   const p = process.platform;
@@ -34,6 +34,33 @@ async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerat
   const decoder = new TextDecoder();
   let buffer = "";
 
+  function findBlockSeparator(input: string): { index: number; length: number } | null {
+    const lf = input.indexOf("\n\n");
+    const crlf = input.indexOf("\r\n\r\n");
+    if (lf < 0 && crlf < 0) {
+      return null;
+    }
+    if (lf < 0) {
+      return { index: crlf, length: 4 };
+    }
+    if (crlf < 0) {
+      return { index: lf, length: 2 };
+    }
+    return lf < crlf ? { index: lf, length: 2 } : { index: crlf, length: 4 };
+  }
+
+  function parseDataBlock(block: string): string | undefined {
+    const dataLines = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""))
+      .filter((line) => line.length > 0);
+    if (dataLines.length === 0) {
+      return undefined;
+    }
+    return dataLines.join("\n");
+  }
+
   while (true) {
     const next = await reader.read();
     if (next.done) {
@@ -42,28 +69,29 @@ async function* parseSseStream(stream: ReadableStream<Uint8Array>): AsyncGenerat
     buffer += decoder.decode(next.value, { stream: true });
 
     while (true) {
-      const separatorIndex = buffer.indexOf("\n\n");
-      if (separatorIndex < 0) {
+      const separator = findBlockSeparator(buffer);
+      if (!separator) {
         break;
       }
-      const block = buffer.slice(0, separatorIndex);
-      buffer = buffer.slice(separatorIndex + 2);
-
-      const dataLines = block
-        .split("\n")
-        .filter((line) => line.startsWith("data: "))
-        .map((line) => line.slice(6).trim())
-        .filter((line) => line.length > 0);
-      if (dataLines.length > 0) {
-        yield dataLines.join("\n");
+      const block = buffer.slice(0, separator.index);
+      buffer = buffer.slice(separator.index + separator.length);
+      const data = parseDataBlock(block);
+      if (data !== undefined) {
+        yield data;
       }
     }
+  }
+
+  const trailing = parseDataBlock(buffer);
+  if (trailing !== undefined) {
+    yield trailing;
   }
 }
 
 export class CodeAssistClient {
   private projectCache?: string;
   private projectCacheAccountKey?: string;
+  private readonly retryAfterAttemptLimit = 10;
 
   constructor(
     private readonly env: AppEnv,
@@ -107,7 +135,8 @@ export class CodeAssistClient {
     execute: (token: string) => Promise<Response>,
     onRetry?: () => Promise<void>
   ): Promise<T> {
-    const attempts = await this.resolveAttempts();
+    const baseAttempts = await this.resolveAttempts();
+    let attempts = baseAttempts;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const token = await this.getAccessToken();
       const response = await execute(token);
@@ -122,14 +151,22 @@ export class CodeAssistClient {
         method,
         response.status,
         body,
-        parseRetryAfterMs(response.headers.get("retry-after"))
+        parseRetryAfterMs(response.headers.get("retry-after")) ?? parseRetryAfterMsFromBody(body)
       );
-      const canRetry = attempt < attempts && await this.hooks.onApiError?.(error);
+      const rotated = await this.hooks.onApiError?.(error);
+      const canRetryWithDelay = typeof error.retryAfterMs === "number" && error.retryAfterMs > 0;
+      if (canRetryWithDelay) {
+        attempts = Math.max(attempts, this.retryAfterAttemptLimit);
+      }
+      const canRetry = attempt < attempts && (Boolean(rotated) || canRetryWithDelay);
       if (!canRetry) {
         throw error;
       }
       await this.invalidateProjectCache();
       await onRetry?.();
+      if (canRetryWithDelay) {
+        await new Promise((resolve) => setTimeout(resolve, error.retryAfterMs));
+      }
     }
     throw new Error(`Code Assist ${method} failed`);
   }
@@ -139,7 +176,8 @@ export class CodeAssistClient {
     execute: (token: string) => Promise<Response>,
     onRetry?: () => Promise<void>
   ): Promise<Response> {
-    const attempts = await this.resolveAttempts();
+    const baseAttempts = await this.resolveAttempts();
+    let attempts = baseAttempts;
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       const token = await this.getAccessToken();
       const response = await execute(token);
@@ -153,14 +191,22 @@ export class CodeAssistClient {
         method,
         response.status,
         body,
-        parseRetryAfterMs(response.headers.get("retry-after"))
+        parseRetryAfterMs(response.headers.get("retry-after")) ?? parseRetryAfterMsFromBody(body)
       );
-      const canRetry = attempt < attempts && await this.hooks.onApiError?.(error);
+      const rotated = await this.hooks.onApiError?.(error);
+      const canRetryWithDelay = typeof error.retryAfterMs === "number" && error.retryAfterMs > 0;
+      if (canRetryWithDelay) {
+        attempts = Math.max(attempts, this.retryAfterAttemptLimit);
+      }
+      const canRetry = attempt < attempts && (Boolean(rotated) || canRetryWithDelay);
       if (!canRetry) {
         throw error;
       }
       await this.invalidateProjectCache();
       await onRetry?.();
+      if (canRetryWithDelay) {
+        await new Promise((resolve) => setTimeout(resolve, error.retryAfterMs));
+      }
     }
     throw new Error(`Code Assist ${method} failed`);
   }

@@ -314,6 +314,19 @@ data: {"id":"...","object":"chat.completion.chunk","choices":[{"finish_reason":"
 data: [DONE]
 ```
 
+Render stream text progressively in terminal:
+
+```bash
+curl -N -sS -X POST http://127.0.0.1:43173/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"model":"gemini-2.5-flash","stream":true,"messages":[{"role":"user","content":"Explain OAuth in three sentences."}]}' \
+| jq -r 'select(startswith("data: ")) | sub("^data: "; "") | fromjson | .choices[0].delta.content // empty' \
+| tr -d '\n'
+echo
+```
+
+> `jq` prints each chunk payload as soon as it arrives, and each printed `content` fragment is appended to the terminal output.
+
 ### 4) How answers are generated
 
 - API is stateless per request

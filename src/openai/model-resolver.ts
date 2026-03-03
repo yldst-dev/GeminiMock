@@ -24,8 +24,14 @@ export function resolveRequestedModel(requestedModel: string, availableModels: s
   }
 
   const directAlias = ALIAS_MAP[requested];
-  if (directAlias && normalized.has(directAlias)) {
-    return directAlias;
+  if (directAlias) {
+    if (normalized.has(directAlias)) {
+      return directAlias;
+    }
+    const aliasPreview = `${directAlias}-preview`;
+    if (normalized.has(aliasPreview)) {
+      return aliasPreview;
+    }
   }
 
   const previewCandidate = `${requested}-preview`;

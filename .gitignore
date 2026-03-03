@@ -18,6 +18,8 @@ pnpm-debug.log*
 .idea
 .vscode
 .DS_Store
-test/
+/test/
 testoption.md
+hn_report.md
+reddit_report.md
 skills/
