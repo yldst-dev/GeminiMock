@@ -7,7 +7,8 @@ import { createAccountStore } from "./auth/account-store.js";
 import { OAuthService, type OAuthLoginMode } from "./auth/oauth-service.js";
 import { runAuthLoginFlow, type LoginKey, type LoginTuiIO } from "./commands/auth-login.js";
 import { runAuthLogoutFlow, type LogoutKey, type LogoutTuiIO } from "./commands/auth-logout.js";
-import { loadEnv } from "./config/env.js";
+import { runAuthPingFlow, type PingKey, type PingResult, type PingTuiIO } from "./commands/auth-ping.js";
+import { loadEnv, type AppEnv } from "./config/env.js";
 import { CodeAssistClient } from "./gemini/code-assist-client.js";
 import { ModelCatalogService } from "./gemini/model-catalog-service.js";
 import { createApp } from "./server/app.js";
@@ -24,6 +25,7 @@ function usage() {
       "  geminimock server status",
       "  geminimock auth login [--manual|--web]",
       "  geminimock auth logout [--all]",
+      "  geminimock auth ping",
       "  geminimock auth accounts list",
       "  geminimock auth accounts use <id|email>",
       "  geminimock auth accounts remove <id|email>",
@@ -263,6 +265,160 @@ async function runAuthLogout(all = false) {
   }
 }
 
+async function performAuthPingRequest(
+  env: AppEnv,
+  oauthService: OAuthService,
+  model: string
+): Promise<PingResult> {
+  const client = new CodeAssistClient(
+    env,
+    () => oauthService.getAccessToken(),
+    {
+      onApiSuccess: () => oauthService.handleCodeAssistSuccess()
+    }
+  );
+  const projectId = await client.resolveProjectId();
+  const response = await client.generateContent({
+    model,
+    project: projectId,
+    request: {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: "Reply with a short one-line ping acknowledgement."
+            }
+          ]
+        }
+      ],
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 64
+      }
+    }
+  });
+  const candidate = response.response.candidates?.[0];
+  const responseText = candidate?.content?.parts?.map((part) => part.text ?? "").join("").trim();
+
+  return {
+    model,
+    projectId,
+    finishReason: candidate?.finishReason,
+    traceId: response.traceId,
+    responseText: responseText && responseText.length > 0 ? responseText : undefined
+  };
+}
+
+async function runAuthPing() {
+  const env = loadEnv();
+  const store = createAccountStore(env.accountsPath, env.oauthPath, env.oauthFallbackPath);
+  const oauthService = new OAuthService(store);
+  const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+  const keyQueue: PingKey[] = [];
+  let keyResolver: ((key: PingKey) => void) | null = null;
+
+  function mapKeypressToPingKey(key: { name?: string; ctrl?: boolean }): PingKey | null {
+    const name = key.name?.toLowerCase();
+    if (name === "up") {
+      return "up";
+    }
+    if (name === "down") {
+      return "down";
+    }
+    if (name === "return" || name === "enter") {
+      return "enter";
+    }
+    if (name === "escape" || name === "q" || (key.ctrl && name === "c")) {
+      return "cancel";
+    }
+    return null;
+  }
+
+  const onKeypress = (_str: string, key: { name?: string; ctrl?: boolean }) => {
+    const mapped = mapKeypressToPingKey(key);
+    if (!mapped) {
+      return;
+    }
+    if (keyResolver) {
+      const resolve = keyResolver;
+      keyResolver = null;
+      resolve(mapped);
+      return;
+    }
+    keyQueue.push(mapped);
+  };
+
+  async function readPingKeyFromTTY(): Promise<PingKey> {
+    const next = keyQueue.shift();
+    if (next) {
+      return next;
+    }
+    return new Promise((resolve) => {
+      keyResolver = resolve;
+    });
+  }
+
+  const io: PingTuiIO = {
+    isTTY,
+    write(message: string) {
+      process.stdout.write(message);
+    },
+    clear() {
+      process.stdout.write("\u001b[2J\u001b[H");
+    },
+    async readKey() {
+      if (!isTTY) {
+        return "cancel";
+      }
+      return readPingKeyFromTTY();
+    }
+  };
+
+  const runFlow = async () => {
+    try {
+      const lines = await runAuthPingFlow({
+        oauthService,
+        store,
+        io,
+        performPing: () => performAuthPingRequest(env, oauthService, env.defaultModel)
+      });
+      if (isTTY) {
+        process.stdout.write("\u001b[2J\u001b[H");
+      }
+      process.stdout.write(`${lines.join("\n")}\n`);
+    } catch (error) {
+      if (isTTY) {
+        process.stdout.write("\u001b[2J\u001b[H");
+      }
+      throw error;
+    }
+  };
+
+  const canRawMode = isTTY && typeof process.stdin.setRawMode === "function";
+  if (!canRawMode) {
+    await runFlow();
+    return;
+  }
+
+  const stdin = process.stdin as NodeJS.ReadStream & { isRaw?: boolean };
+  const wasRaw = Boolean(stdin.isRaw);
+  emitKeypressEvents(stdin);
+  stdin.on("keypress", onKeypress);
+  stdin.setRawMode(true);
+  stdin.resume();
+  process.stdout.write("\u001b[?25l");
+  try {
+    await runFlow();
+  } finally {
+    process.stdout.write("\u001b[?25h");
+    stdin.off("keypress", onKeypress);
+    keyResolver = null;
+    stdin.setRawMode(wasRaw);
+    stdin.pause();
+  }
+}
+
 async function runAuthAccountsList() {
   const env = loadEnv();
   const store = createAccountStore(env.accountsPath, env.oauthPath, env.oauthFallbackPath);
@@ -422,6 +578,11 @@ async function main() {
 
   if (args[0] === "auth" && args[1] === "logout") {
     await runAuthLogout(args.includes("--all"));
+    return;
+  }
+
+  if (args[0] === "auth" && args[1] === "ping") {
+    await runAuthPing();
     return;
   }
 

@@ -30,6 +30,7 @@
     "auth:login": "bun src/cli.ts auth login",
     "auth:logout": "bun src/cli.ts auth logout",
     "auth:logout:all": "bun src/cli.ts auth logout --all",
+    "auth:ping": "bun src/cli.ts auth ping",
     "auth:accounts:list": "bun src/cli.ts auth accounts list",
     "models:list": "bun src/cli.ts models list",
     "self:update": "bun src/cli.ts update",
