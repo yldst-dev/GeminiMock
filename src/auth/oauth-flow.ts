@@ -17,9 +17,8 @@ const GEMINI_OAUTH_SOURCE_RELATIVE_PATHS = [
 
 const DEFAULT_GEMINI_CLI_OAUTH_CLIENT_ID = [
   "681255809395",
-  "oo8ft2oprdrnp9e3aqf6av3hmdib135j",
-  "apps.googleusercontent.com"
-].join("-");
+  "oo8ft2oprdrnp9e3aqf6av3hmdib135j"
+].join("-") + ".apps.googleusercontent.com";
 
 export const GEMINI_CLI_OAUTH_REDIRECT_URI = "https://codeassist.google.com/authcode";
 export const GEMINI_CLI_OAUTH_SCOPE = [
