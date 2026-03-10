@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
-import { OAuth2Client, CodeChallengeMethod, type Credentials } from "google-auth-library";
+import {
+  CodeChallengeMethod,
+  OAuthClient,
+  type OAuthCredentials
+} from "./oauth-client.js";
 
 const GEMINI_OAUTH_SOURCE_RELATIVE_PATHS = [
   "node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
@@ -12,6 +15,12 @@ const GEMINI_OAUTH_SOURCE_RELATIVE_PATHS = [
   "@google/gemini-cli-core/dist/src/code_assist/oauth2.js"
 ] as const;
 
+const DEFAULT_GEMINI_CLI_OAUTH_CLIENT_ID = [
+  "681255809395",
+  "oo8ft2oprdrnp9e3aqf6av3hmdib135j",
+  "apps.googleusercontent.com"
+].join("-");
+
 export const GEMINI_CLI_OAUTH_REDIRECT_URI = "https://codeassist.google.com/authcode";
 export const GEMINI_CLI_OAUTH_SCOPE = [
   "https://www.googleapis.com/auth/cloud-platform",
@@ -19,7 +28,6 @@ export const GEMINI_CLI_OAUTH_SCOPE = [
   "https://www.googleapis.com/auth/userinfo.profile"
 ] as const;
 const GEMINI_CLI_OAUTH_PROMPT = "consent select_account";
-const require = createRequire(import.meta.url);
 
 type OAuthClientConfig = {
   clientId: string;
@@ -37,6 +45,7 @@ export type ManualOAuthRequest = {
 
 export type WebOAuthRequest = {
   authUrl: string;
+  codeVerifier: string;
   state: string;
   redirectUri: string;
 };
@@ -161,16 +170,6 @@ function discoverFromGlobalNpmRoot(): OAuthClientConfig | null {
   }
 }
 
-function discoverFromBundledGeminiCliCore(): OAuthClientConfig | null {
-  try {
-    const geminiCliCorePackageJson = require.resolve("@google/gemini-cli-core/package.json");
-    const geminiCliCoreDir = path.dirname(geminiCliCorePackageJson);
-    return readConfigFromSourceFile(path.join(geminiCliCoreDir, "dist/src/code_assist/oauth2.js"));
-  } catch {
-    return null;
-  }
-}
-
 function discoverDefaultClientConfig(): OAuthClientConfig | null {
   if (process.env.GEMINI_CLI_OAUTH_AUTO_DISCOVERY === "0") {
     return null;
@@ -187,9 +186,8 @@ function discoverDefaultClientConfig(): OAuthClientConfig | null {
 
   discoveredClientConfig =
     discoverFromGeminiBinary()
-    ?? discoverFromBundledGeminiCliCore()
     ?? discoverFromGlobalNpmRoot()
-    ?? null;
+    ?? { clientId: DEFAULT_GEMINI_CLI_OAUTH_CLIENT_ID };
   return discoveredClientConfig;
 }
 
@@ -213,14 +211,14 @@ export function hasConfiguredOAuthClient(): boolean {
   return Boolean(resolveClientId());
 }
 
-export function createOAuthClient(): OAuth2Client {
+export function createOAuthClient(): OAuthClient {
   const clientId = resolveClientId();
   if (!clientId) {
     throw new Error(
       "OAuth client is not configured. Set GEMINI_CLI_OAUTH_CLIENT_ID or reinstall geminimock."
     );
   }
-  return new OAuth2Client({
+  return new OAuthClient({
     clientId,
     clientSecret: resolveClientSecret()
   });
@@ -247,8 +245,9 @@ export async function buildManualOAuthRequest(): Promise<ManualOAuthRequest> {
   };
 }
 
-export function buildWebOAuthRequest(port: number): WebOAuthRequest {
+export async function buildWebOAuthRequest(port: number): Promise<WebOAuthRequest> {
   const client = createOAuthClient();
+  const verifier = await client.generateCodeVerifierAsync();
   const state = randomBytes(32).toString("hex");
   const redirectUri = `http://127.0.0.1:${port}/oauth2callback`;
   const authUrl = client.generateAuthUrl({
@@ -256,9 +255,11 @@ export function buildWebOAuthRequest(port: number): WebOAuthRequest {
     access_type: "offline",
     prompt: GEMINI_CLI_OAUTH_PROMPT,
     scope: [...GEMINI_CLI_OAUTH_SCOPE],
+    code_challenge_method: CodeChallengeMethod.S256,
+    code_challenge: verifier.codeChallenge,
     state
   });
-  return { authUrl, state, redirectUri };
+  return { authUrl, codeVerifier: verifier.codeVerifier, state, redirectUri };
 }
 
 export function parseOAuthInput(input: string): ParsedOAuthInput {
@@ -280,7 +281,7 @@ export function parseOAuthInput(input: string): ParsedOAuthInput {
   return { code: value };
 }
 
-export async function exchangeManualCode(request: ManualOAuthRequest, code: string): Promise<Credentials> {
+export async function exchangeManualCode(request: ManualOAuthRequest, code: string): Promise<OAuthCredentials> {
   const parsed = parseOAuthInput(code);
   if (parsed.state && parsed.state !== request.state) {
     throw new Error("OAuth state mismatch");
@@ -294,10 +295,11 @@ export async function exchangeManualCode(request: ManualOAuthRequest, code: stri
   return tokenResponse.tokens;
 }
 
-export async function exchangeWebCode(request: WebOAuthRequest, code: string): Promise<Credentials> {
+export async function exchangeWebCode(request: WebOAuthRequest, code: string): Promise<OAuthCredentials> {
   const client = createOAuthClient();
   const tokenResponse = await client.getToken({
     code,
+    codeVerifier: request.codeVerifier,
     redirect_uri: request.redirectUri
   });
   return tokenResponse.tokens;

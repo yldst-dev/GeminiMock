@@ -25,6 +25,11 @@ export type PingResult = {
   traceId?: string;
 };
 
+type PingDisplay = {
+  ok: boolean;
+  lines: string[];
+};
+
 export type RunAuthPingFlowOptions = {
   oauthService: PingService;
   store: PingStore;
@@ -90,7 +95,7 @@ async function pingAccountAndDescribe(
   store: PingStore,
   performPing: () => Promise<PingResult>,
   target: StoredAccount
-): Promise<string[]> {
+): Promise<PingDisplay> {
   const activeBefore = await store.getActiveAccount();
   const shouldSwitch = activeBefore?.id !== target.id;
 
@@ -100,29 +105,75 @@ async function pingAccountAndDescribe(
 
   try {
     const result = await performPing();
+    const missingFields: string[] = [];
+    if (!result.projectId) {
+      missingFields.push("project");
+    }
+    if (!result.finishReason) {
+      missingFields.push("finish reason");
+    }
+    if (!result.traceId) {
+      missingFields.push("trace id");
+    }
+
+    const ok = missingFields.length === 0;
     const lines = [
       `Ping account: ${formatAccountLabel(target)}`,
+      `Status: ${ok ? "OK" : "FAIL"}`,
       `Model: ${result.model}`
     ];
 
+    if (!ok) {
+      lines.push(`Reason: Missing ${missingFields.join(", ")}`);
+    }
     if (result.projectId) {
       lines.push(`Project: ${result.projectId}`);
+    } else {
+      lines.push("Project: (missing)");
     }
     if (result.finishReason) {
       lines.push(`Finish reason: ${result.finishReason}`);
+    } else {
+      lines.push("Finish reason: (missing)");
     }
     if (result.traceId) {
       lines.push(`Trace ID: ${result.traceId}`);
+    } else {
+      lines.push("Trace ID: (missing)");
     }
 
     lines.push("Response:");
     lines.push(result.responseText && result.responseText.trim().length > 0 ? result.responseText : "(empty)");
-    return lines;
+    return { ok, lines };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      lines: [
+        `Ping account: ${formatAccountLabel(target)}`,
+        "Status: FAIL",
+        `Error: ${message}`,
+        "Response:",
+        "(empty)"
+      ]
+    };
   } finally {
     if (shouldSwitch && activeBefore) {
       await oauthService.useAccount(activeBefore.id);
     }
   }
+}
+
+function renderResultScreen(display: PingDisplay): string {
+  return [
+    "+------------------------------------------------------------+",
+    `| Ping Result: ${display.ok ? "OK" : "FAIL"}${" ".repeat(display.ok ? 35 : 33)}|`,
+    "+------------------------------------------------------------+",
+    ...display.lines,
+    "",
+    "Press Enter/Up/Down to return, Q/Esc to cancel",
+    ""
+  ].join("\n");
 }
 
 export async function runAuthPingFlow(options: RunAuthPingFlowOptions): Promise<string[]> {
@@ -134,7 +185,8 @@ export async function runAuthPingFlow(options: RunAuthPingFlowOptions): Promise<
 
   const active = await store.getActiveAccount();
   if (!io.isTTY) {
-    return pingAccountAndDescribe(oauthService, store, performPing, active ?? accounts[0]);
+    const display = await pingAccountAndDescribe(oauthService, store, performPing, active ?? accounts[0]);
+    return display.lines;
   }
 
   const items = buildMenuItems(accounts);
@@ -161,6 +213,14 @@ export async function runAuthPingFlow(options: RunAuthPingFlowOptions): Promise<
     if (!selected || selected.kind === "cancel") {
       return ["Ping cancelled"];
     }
-    return pingAccountAndDescribe(oauthService, store, performPing, selected.account);
+
+    const display = await pingAccountAndDescribe(oauthService, store, performPing, selected.account);
+    io.clear();
+    io.write(`${renderResultScreen(display)}\n`);
+
+    const nextKey = await io.readKey();
+    if (nextKey === "cancel") {
+      return ["Ping cancelled"];
+    }
   }
 }

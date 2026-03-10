@@ -76,20 +76,35 @@ function createPingResult(overrides: Partial<PingResult> = {}): PingResult {
 }
 
 describe("runAuthPingFlow", () => {
-  it("pings the selected account and restores the previous active account", async () => {
+  it("pings the selected account, shows OK, and returns to the selector", async () => {
     const { oauthService, store } = createHarness();
-    const io = createIO(["down", "enter"]);
-    const performPing = vi.fn(async () => createPingResult());
+    const io = createIO(["down", "enter", "enter", "cancel"]);
+    const performPing = vi.fn(async () => createPingResult({
+      projectId: "utility-density-5bbcp",
+      finishReason: "MAX_TOKENS",
+      traceId: "38cfa2ef2af0a3d",
+      responseText: ""
+    }));
 
     const lines = await runAuthPingFlow({ oauthService, store, io, performPing });
 
     expect(oauthService.useAccount).toHaveBeenNthCalledWith(1, "a2");
     expect(oauthService.useAccount).toHaveBeenNthCalledWith(2, "a1");
     expect(performPing).toHaveBeenCalledTimes(1);
-    expect(lines).toContain("Ping account: a2 (two@example.com)");
-    expect(lines).toContain("Model: gemini-2.5-pro");
-    expect(lines).toContain("Response:");
-    expect(lines).toContain("PONG");
+    expect(lines).toEqual(["Ping cancelled"]);
+
+    const resultScreen = String(io.writeSpy.mock.calls[2]?.[0] ?? "");
+    expect(resultScreen).toContain("Status: OK");
+    expect(resultScreen).toContain("Ping account: a2 (two@example.com)");
+    expect(resultScreen).toContain("Model: gemini-2.5-pro");
+    expect(resultScreen).toContain("Project: utility-density-5bbcp");
+    expect(resultScreen).toContain("Finish reason: MAX_TOKENS");
+    expect(resultScreen).toContain("Trace ID: 38cfa2ef2af0a3d");
+    expect(resultScreen).toContain("Response:");
+    expect(resultScreen).toContain("(empty)");
+
+    const returnedSelector = String(io.writeSpy.mock.calls[3]?.[0] ?? "");
+    expect(returnedSelector).toContain("GeminiMock Account Ping Selector");
   });
 
   it("uses the active account directly when not running in a TTY", async () => {
@@ -102,7 +117,28 @@ describe("runAuthPingFlow", () => {
     expect(oauthService.useAccount).not.toHaveBeenCalled();
     expect(performPing).toHaveBeenCalledTimes(1);
     expect(lines).toContain("Ping account: a1 (one@example.com)");
+    expect(lines).toContain("Status: FAIL");
+    expect(lines).toContain("Reason: Missing project, finish reason, trace id");
     expect(lines).toContain("ready");
+  });
+
+  it("shows OK when the ping returns the expected diagnostics", async () => {
+    const { oauthService, store } = createHarness();
+    const io = createIO([], false);
+    const performPing = vi.fn(async () => createPingResult({
+      projectId: "utility-density-5bbcp",
+      finishReason: "MAX_TOKENS",
+      traceId: "38cfa2ef2af0a3d",
+      responseText: ""
+    }));
+
+    const lines = await runAuthPingFlow({ oauthService, store, io, performPing });
+
+    expect(lines).toContain("Status: OK");
+    expect(lines).toContain("Project: utility-density-5bbcp");
+    expect(lines).toContain("Finish reason: MAX_TOKENS");
+    expect(lines).toContain("Trace ID: 38cfa2ef2af0a3d");
+    expect(lines).toContain("(empty)");
   });
 
   it("cancels when the cancel row is selected", async () => {
@@ -117,16 +153,22 @@ describe("runAuthPingFlow", () => {
     expect(lines).toEqual(["Ping cancelled"]);
   });
 
-  it("restores the previous active account when ping fails", async () => {
+  it("restores the previous active account and shows FAIL when ping throws", async () => {
     const { oauthService, store } = createHarness();
-    const io = createIO(["down", "enter"]);
+    const io = createIO(["down", "enter", "cancel"]);
     const performPing = vi.fn(async () => {
       throw new Error("Ping failed");
     });
 
-    await expect(runAuthPingFlow({ oauthService, store, io, performPing })).rejects.toThrow("Ping failed");
+    const lines = await runAuthPingFlow({ oauthService, store, io, performPing });
+
+    expect(lines).toEqual(["Ping cancelled"]);
     expect(oauthService.useAccount).toHaveBeenNthCalledWith(1, "a2");
     expect(oauthService.useAccount).toHaveBeenNthCalledWith(2, "a1");
+
+    const resultScreen = String(io.writeSpy.mock.calls[2]?.[0] ?? "");
+    expect(resultScreen).toContain("Status: FAIL");
+    expect(resultScreen).toContain("Error: Ping failed");
   });
 
   it("shows the active account legend in the selector screen", async () => {

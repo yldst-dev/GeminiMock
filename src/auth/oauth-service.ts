@@ -3,9 +3,9 @@ import { spawn } from "node:child_process";
 import net from "node:net";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import type { OAuth2Client } from "google-auth-library";
 import type { AccountStore, StoredAccount } from "./account-store.js";
 import type { StoredCredentials } from "./credential-store.js";
+import type { OAuthClient } from "./oauth-client.js";
 import {
   buildManualOAuthRequest,
   buildWebOAuthRequest,
@@ -54,7 +54,7 @@ function normalizeCredentials(credentials: StoredCredentials): StoredCredentials
   };
 }
 
-async function fetchUserEmail(client: OAuth2Client): Promise<string | undefined> {
+async function fetchUserEmail(client: OAuthClient): Promise<string | undefined> {
   const token = await client.getAccessToken();
   if (!token.token) {
     return undefined;
@@ -352,7 +352,7 @@ export class OAuthService {
 
   private async loginWithWebCallback(io: OAuthServiceIO): Promise<{ email?: string }> {
     const port = await getAvailablePort();
-    const request = buildWebOAuthRequest(port);
+    const request = await buildWebOAuthRequest(port);
     const listener = await startCallbackListener(port, OAUTH_TIMEOUT_MS);
 
     try {
@@ -430,7 +430,7 @@ export class OAuthService {
     await this.store.clearAll();
   }
 
-  async getClient(): Promise<OAuth2Client> {
+  async getClient(): Promise<OAuthClient> {
     const active = await this.store.getActiveAccount();
     if (!active) {
       throw new Error("OAuth credentials not found. Run auth login first.");

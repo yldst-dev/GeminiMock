@@ -94,7 +94,7 @@ describe("oauth client config", () => {
     }
   });
 
-  it("uses bundled gemini-cli-core OAuth client when env is unavailable", async () => {
+  it("uses built-in Gemini CLI OAuth client defaults when env is unavailable", async () => {
     delete process.env.GEMINI_CLI_OAUTH_CLIENT_ID;
     delete process.env.GEMINI_CLI_OAUTH_CLIENT_SECRET;
     delete process.env.GEMINI_CLI_OAUTH_SOURCE_PATH;

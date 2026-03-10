@@ -48,13 +48,14 @@ describe("buildWebOAuthRequest", () => {
     setConfiguredEnv();
     vi.resetModules();
     const module = await import("../../src/auth/oauth-flow.js");
-    const request = module.buildWebOAuthRequest(43123);
+    const request = await module.buildWebOAuthRequest(43123);
     const url = new URL(request.authUrl);
     expect(url.origin).toBe("https://accounts.google.com");
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:43123/oauth2callback");
     expect(url.searchParams.get("prompt")).toContain("select_account");
-    expect(url.searchParams.get("code_challenge_method")).toBeNull();
-    expect(url.searchParams.get("code_challenge")).toBeNull();
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toBeTruthy();
     expect(url.searchParams.get("state")).toBe(request.state);
+    expect(request.codeVerifier.length).toBeGreaterThan(20);
   });
 });
